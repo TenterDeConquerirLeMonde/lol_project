@@ -52,7 +52,7 @@ def run():
 
 		if(data is not None):
 
-            print "Recording games from summoner : " + str(summoner)
+			print "Recording games from summoner : " + str(summoner)
 			success += record_games(summoner, data["games"], c)
 			random_discard()
 
