@@ -4,19 +4,30 @@ import json
 import time
 
 MAX_API_CALLS = 10
-WAIT_TIME_SECONDS = 20
+WAIT_TIME_SECONDS = 12
 
 matchUrl = "https://na.api.pvp.net/api/lol/na/v1.3/game/by-summoner/"
 rankUrl = "https://na.api.pvp.net/api/lol/na/v2.5/league/by-summoner/"
 
 testSummonerId = "59781731"
 
-apiKey = "?api_key=RGAPI-B34D1399-0E8A-4DF4-86A2-FF6B9264E79A"
 
-firstCallTime = 0
+apiKey = []
+firstCallTime = []
 apiCalls = 0
 totalApiCalls = 0
 totalSleepTime = 0
+currentKey = 0
+
+def load_keys():
+
+	global firstCallTime
+	global apiKey
+
+	f = open('keys.txt', 'r')
+	for line in f:
+		apiKey.append("?api_key=" + line)
+		firstCallTime.append(0)
 
 
 
@@ -181,19 +192,26 @@ def api_call(url, tries = 0) :
 	global firstCallTime
 	global totalApiCalls
 	global totalSleepTime
+	global currentKey
 
 	if(apiCalls == MAX_API_CALLS):
-		#have to wait
-		sleepTime = - time.time() + WAIT_TIME_SECONDS + firstCallTime
-		#print "Sleeping for " + str(sleepTime) + " s"
-		totalSleepTime += sleepTime
-		time.sleep(sleepTime)
+		#Reach max on this key go to next key
+		currentKey = (currentKey + 1) % apiKey.__len__()
+
+
 		apiCalls = 0
 
 	if(apiCalls == 0) :
-		firstCallTime = time.time()
+		#Check if need to wait
+		sleepTime = firstCallTime[currentKey]- time.time() + WAIT_TIME_SECONDS
+		if(sleepTime > 0):
+			#Need to sleep
+			totalSleepTime += sleepTime
+			time.sleep(sleepTime)
 
-	response = requests.get(url + apiKey)
+		firstCallTime[currentKey] = time.time()
+
+	response = requests.get(url + apiKey[currentKey])
 	apiCalls += 1
 	totalApiCalls += 1
 
