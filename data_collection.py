@@ -7,7 +7,7 @@ MAX_API_CALLS = 10
 WAIT_TIME_SECONDS = 12
 
 matchUrl = "https://na.api.pvp.net/api/lol/na/v1.3/game/by-summoner/"
-rankUrl = "https://na.api.pvp.net/api/lol/na/v2.5/league/by-summoner/"
+rankUrl = "https://na.api.riotgames.com/api/lol/NA/v2.5/league/by-summoner/"
 
 testSummonerId = "59781731"
 
@@ -19,17 +19,6 @@ totalApiCalls = 0
 totalSleepTime = 0
 currentKey = 0
 
-def load_keys():
-
-	global firstCallTime
-	global apiKey
-
-	f = open('keys.txt', 'r')
-	for line in f:
-		apiKey.append("?api_key=" + line)
-		firstCallTime.append(0)
-
-
 
 def run():
 
@@ -38,6 +27,8 @@ def run():
 	conn = sqlite3.connect('lol.db')
 
 	c = conn.cursor()
+
+	load_keys()
 
 	requestUrl = matchUrl + testSummonerId + "/recent"
 	data = api_call(requestUrl)
@@ -216,13 +207,28 @@ def api_call(url, tries = 0) :
 	totalApiCalls += 1
 
 	if(not response.ok) :
-		print "Error " + str(response.status_code) + " on " + url + apiKey
+		print "Error " + str(response.status_code) + " on " + url + apiKey[currentKey]
 		if(response.status_code == 500):
 			if(tries < 3):
 				return apiCalls(url, tries + 1)
 		return None;
 
 	return json.loads(response.content)
+
+def load_keys():
+
+	global firstCallTime
+	global apiKey
+
+	f = open('keys.txt', 'r')
+	for line in f:
+		apiKey.append("?api_key=" + line[:-2])
+		firstCallTime.append(0)
+		print line[:-2]
+	f.close()
+	return ;
+
+
 
 
 def rank_conversion(tier, division):
