@@ -22,149 +22,191 @@ totalSleepTime = 0
 currentKey = 0
 
 summoners = [testSummonerId]
-RUN_TIME = 60
+RUN_TIME = 1800
 MAX_SUMMONERS = 20
 
 
 def run():
 
-	startTime = time.time()
+    global summoners
 
-	conn = sqlite3.connect('lol.db')
+    startTime = time.time()
 
-	c = conn.cursor()
+    conn = sqlite3.connect('lol.db')
 
-	load_keys()
-	load_summoners()
+    c = conn.cursor()
 
-	success = 0
+    load_keys()
+    load_summoners()
 
-	while summoners and (time.time() - startTime) < RUN_TIME:
+    success = 0
+    invalid = 0
+    duplicate = 0
+
+    n = 0
+
+    log = open('log.txt', 'w')
 
 
-		summoner = summoners.pop(0)
+    while summoners and (time.time() - startTime) < RUN_TIME:
 
-		requestUrl = matchUrl + summoner + "/recent"
-		data = api_call(requestUrl)
+        if n % 10 == 0 and n > 0:
+            big_statement(str(success) + " games recorded (" + str(duplicate) + " duplicates and " + str(invalid) \
+                          + " invalid ones) so far with " + str(n) + " players in " + time_format(time.time() - startTime))
 
-		# response = requests.get(requestUrl + testApiKey)
-		# print requestUrl + testApiKey
-		# print("Matchs request : " + str(response.status_code))
+        # print summoners
+        log.write(str(summoners) + "\n")
 
-		if(data is not None):
+        summoner = summoners.pop(0)
 
-			print "Recording games from summoner : " + str(summoner)
-			success += record_games(summoner, data["games"], c)
-			random_discard()
+        log.write(summoner + "\n")
 
-		conn.commit()
-		#conn.close()
+        requestUrl = matchUrl + summoner + "/recent"
+        data = api_call(requestUrl)
 
-	conn.close()
-	big_statement(str(success) + " games recorded in " + str(format((time.time() - startTime), '.2f')) \
-			  + " s using " + str(totalApiCalls) + " API calls and sleeping for " + str(format(totalSleepTime, '.2f')) + " s")
+        # response = requests.get(requestUrl + testApiKey)
+        # print requestUrl + testApiKey
+        # print("Matchs request : " + str(response.status_code))
 
-	return ;
+        if(data is not None):
+
+            print "Recording games from summoner : " + str(summoner) + " out of " + str(summoners.__len__()) \
+                  + " listed summoners"
+            n += 1
+            s,d,i = record_games(summoner, data["games"], c)
+            success += s
+            invalid += i
+            duplicate += d
+            random_discard()
+
+        conn.commit()
+        #conn.close()
+
+
+    big_statement(str(success) + " games recorded (" + str(duplicate) + " duplicates and " + str(invalid)\
+                  + " invalid games) in " + time_format(time.time() - startTime) \
+              + " using " + str(totalApiCalls) + " API calls and sleeping for " + time_format(totalSleepTime))
+
+
+    c.execute("SELECT COUNT(*) FROM matchs")
+    totaldb = c.fetchone()[0]
+
+    conn.close()
+    log.close()
+
+    big_statement("The database countains " + str(totaldb) + " games")
+
+    return ;
 
 
 def record_games(summonerId, games, c):
-	#Parse the json and add to the DB
-	i = 0
-	global summoners
+    #Parse the json and add to the DB
+    i = 0
+    invalid = 0
+    duplicate = 0
+    global summoners
 
-	for game in games:
-		start = time.time()
-		#check if already recorded
-		sqlCheck = "SELECT champ11 FROM matchs WHERE gameId = " + str(game["gameId"])
-		# print sqlCheck
-		c.execute(sqlCheck)
-		#print test
-		previous = c.fetchone()
-		# TODO : use test
-		if(previous is None):
+    for game in games:
+        start = time.time()
+        #check if already recorded
+        sqlCheck = "SELECT champ11 FROM matchs WHERE gameId = " + str(game["gameId"])
+        # print sqlCheck
+        c.execute(sqlCheck)
+        #print test
+        previous = c.fetchone()
+        if(previous is None):
 
-			#new game
-			#check RANKED
-			if(game["subType"] == "RANKED_SOLO_5x5"):
-				i += 1
-				champsTeam1 = []
-				champsTeam2 = []
-				levelTeam1 = []
-				levelTeam2 = []
+            #new game
+            #check RANKED
+            if(game["subType"] == "RANKED_SOLO_5x5"):
+                i += 1
+                champsTeam1 = []
+                champsTeam2 = []
+                levelTeam1 = []
+                levelTeam2 = []
 
-				players = [summonerId]
-				for player in game["fellowPlayers"]:
-					players.append(str(player["summonerId"]))
+                players = [summonerId]
+                for player in game["fellowPlayers"]:
+                    players.append(str(player["summonerId"]))
 
-				summoners.extend(players)
-				#get bulk ranks for all players in the game
+                summoners.extend(players)
+                #get bulk ranks for all players in the game
 
-				stats = bulk_rank_stats(players)
-				winnerTeam = (2 - game["stats"]["win"])*game["teamId"] % 300
+                stats = bulk_rank_stats(players)
+                winnerTeam = (2 - game["stats"]["win"])*game["teamId"] % 300
 
-				if(game["teamId"] == 100):
-					champsTeam1.append(game["championId"])
-					levelTeam1.append(stats[summonerId])
+                if(game["teamId"] == 100):
+                    champsTeam1.append(game["championId"])
+                    levelTeam1.append(stats[summonerId])
 
-				else:
-					champsTeam2.append(game["championId"])
-					levelTeam2.append(stats[summonerId])
-
-
-				for player in game["fellowPlayers"] :
-					if(player["teamId"] == 100):
-						champsTeam1.append(player["championId"])
-						levelTeam1.append(stats[str(player["summonerId"])])
-					else :
-						champsTeam2.append(player["championId"])
-						levelTeam2.append(stats[str(player["summonerId"])])
+                else:
+                    champsTeam2.append(game["championId"])
+                    levelTeam2.append(stats[summonerId])
 
 
-				record = [game["gameId"]]
-				record.extend(champsTeam1)
-				record.extend(champsTeam2)
-				record.extend(levelTeam1)
-				record.extend(levelTeam2)
-				record.append(winnerTeam)
+                for player in game["fellowPlayers"] :
+                    if(player["teamId"] == 100):
+                        champsTeam1.append(player["championId"])
+                        levelTeam1.append(stats[str(player["summonerId"])])
+                    else :
+                        champsTeam2.append(player["championId"])
+                        levelTeam2.append(stats[str(player["summonerId"])])
 
-				sqlAction = "INSERT INTO matchs VALUES(" + ','.join(map(str, record)) + ")"
-				c.execute(sqlAction)
-				print("New Game " + str(i) + " : " + str(record) + " computed in " + str(format((time.time() - start), '.2f')) + "s")
 
-		else:
-			print("Game already recorded")
+                record = [game["gameId"]]
+                record.extend(champsTeam1)
+                record.extend(champsTeam2)
+                record.extend(levelTeam1)
+                record.extend(levelTeam2)
+                record.append(winnerTeam)
 
-	# print(str(i - 1) + " games added to db")
-	return i;
+                if record.__contains__(-1):
+                    # print "Invalid record"
+                    i -= 1
+                    invalid += 1
+
+                else :
+
+                    sqlAction = "INSERT INTO matchs VALUES(" + ','.join(map(str, record)) + ")"
+                    c.execute(sqlAction)
+                    # print("New Game " + str(i) + " : " + str(record) + " computed in " + str(format((time.time() - start), '.2f')) + "s")
+
+        else:
+            # print("Game already recorded")
+            duplicate += 1
+
+    # print(str(i - 1) + " games added to db")
+    print(str(i) + " new games, " + str(duplicate) + " duplicate games and " + str(invalid) + " invalid")
+    return i, duplicate, invalid;
 
 
 
 def bulk_rank_stats(summonerIds):
-	#initialize ranks
-	stats = dict()
-	for id in summonerIds:
-		stats[id] = -1
+    #initialize ranks
+    stats = dict()
+    for id in summonerIds:
+        stats[id] = -1
 
-	requestUrl = rankUrl + ','.join(map(str, summonerIds)) + "/entry"
+    requestUrl = rankUrl + ','.join(map(str, summonerIds)) + "/entry"
 
-	data = api_call(requestUrl)
+    data = api_call(requestUrl)
 
-	if(data is not None):
-	#	print("rank response ok")
-		for id in summonerIds:
+    if(data is not None):
+    #	print("rank response ok")
+        for id in summonerIds:
 
-			if id in data.keys() :
-				for entry in data[id] :
-					if(entry["queue"] == "RANKED_SOLO_5x5"):
-						for x in entry["entries"]:
-							stats[id] = rank_conversion(entry["tier"], x["division"])
-
-
-	else:
-		print "Rank failure"
+            if id in data.keys() :
+                for entry in data[id] :
+                    if(entry["queue"] == "RANKED_SOLO_5x5"):
+                        for x in entry["entries"]:
+                            stats[id] = rank_conversion(entry["tier"], x["division"])
 
 
-	return stats;
+    else:
+        print "Rank failure"
+
+
+    return stats;
 
 # def rank_stats(summonerId, c):
 # 	# check db
@@ -202,135 +244,155 @@ def bulk_rank_stats(summonerIds):
 
 def api_call(url, tries = 0) :
 
-	global apiCalls
-	global firstCallTime
-	global totalApiCalls
-	global totalSleepTime
-	global currentKey
+    global apiCalls
+    global firstCallTime
+    global totalApiCalls
+    global totalSleepTime
+    global currentKey
 
-	if(apiCalls == MAX_API_CALLS):
-		#Reach max on this key go to next key
-		currentKey = (currentKey + 1) % apiKey.__len__()
+    if(apiCalls == MAX_API_CALLS):
+        #Reach max on this key go to next key
+        currentKey = (currentKey + 1) % apiKey.__len__()
 
 
-		apiCalls = 0
+        apiCalls = 0
 
-	if(apiCalls == 0) :
-		#Check if need to wait
-		sleepTime = firstCallTime[currentKey]- time.time() + WAIT_TIME_SECONDS
-		if(sleepTime > 0):
-			#Need to sleep
-			totalSleepTime += sleepTime
-			time.sleep(sleepTime)
+    if(apiCalls == 0) :
+        #Check if need to wait
+        sleepTime = firstCallTime[currentKey]- time.time() + WAIT_TIME_SECONDS
+        if(sleepTime > 0):
+            #Need to sleep
+            totalSleepTime += sleepTime
+            time.sleep(sleepTime)
 
-		firstCallTime[currentKey] = time.time()
+        firstCallTime[currentKey] = time.time()
 
-	response = requests.get(url + apiKey[currentKey])
-	apiCalls += 1
-	totalApiCalls += 1
+    response = requests.get(url + apiKey[currentKey])
+    apiCalls += 1
+    totalApiCalls += 1
 
-	if(not response.ok) :
-		print "Error " + str(response.status_code) + " on " + url + apiKey[currentKey]
-		if(response.status_code == 500):
-			if(tries < 3):
-				return apiCalls(url, tries + 1)
-		return None;
+    if(not response.ok) :
+        print "Error " + str(response.status_code) + " on " + url + apiKey[currentKey]
+        if(response.status_code == 500):
+            if(tries < 3):
+                return api_call(url, tries + 1)
+        return None;
 
-	return json.loads(response.content)
+    return json.loads(response.content)
 
 def load_keys():
 
-	global firstCallTime
-	global apiKey
+    global firstCallTime
+    global apiKey
 
-	f = open('keys.txt', 'r')
-	for line in f:
-		apiKey.append("?api_key=" + line[:42])
-		firstCallTime.append(0)
+    f = open('keys.txt', 'r')
+    for line in f:
+        apiKey.append("?api_key=" + line[:42])
+        firstCallTime.append(0)
 
-	f.close()
+    f.close()
 
-	return ;
+    return ;
 
 
 def load_summoners():
 
-	global summoners
-	f = open('summoners.txt', 'r+')
-	for line in f:
-		summoners.append(line[:8])
+    global summoners
+    f = open('summoners.txt', 'r+')
+    for line in f:
+        summoners.append(line[:8])
 
-	f.seek()
-	f.truncate()
-	f.close()
+    f.seek(0)
+    f.truncate()
+    f.close()
+    random_discard()
 
 
 
 def rank_conversion(tier, division):
 
-	rank = 0
-	if(tier == "BRONZE"):
-		rank = 0
-	if (tier == "SILVER"):
-		rank = 5
-	if (tier == "GOLD"):
-		rank = 10
-	if (tier == "PLATINUM"):
-		rank = 15
-	if (tier == "DIAMOND"):
-		rank = 20
+    rank = 0
+    if(tier == "BRONZE"):
+        rank = 0
+    if (tier == "SILVER"):
+        rank = 5
+    if (tier == "GOLD"):
+        rank = 10
+    if (tier == "PLATINUM"):
+        rank = 15
+    if (tier == "DIAMOND"):
+        rank = 20
 
-	#TODO : deal with Master
+    #TODO : deal with Master
 
 
-	rank = rank + division_conversion(division)
+    rank = rank + division_conversion(division)
 
-	return rank;
+    return rank;
 
 def division_conversion(division):
-	if(division == "V"):
-		return 1
-	if (division == "IV"):
-		return 2
-	if (division == "III"):
-		return 3
-	if (division == "II"):
-		return 4
-	if (division == "I"):
-		return 5
+    if(division == "V"):
+        return 1
+    if (division == "IV"):
+        return 2
+    if (division == "III"):
+        return 3
+    if (division == "II"):
+        return 4
+    if (division == "I"):
+        return 5
 
 def big_statement(statement):
-	dot = 100
-	star = 7
-	space = 5
-	print  "\n\n" + dot*"-" +"\n" + star*"*" + space*" " + statement + space*" " + star*"*" + "\n" + dot*"-" + "\n\n"
-	return ;
+    dot = 100
+    star = 7
+    space = 5
+    print  "\n\n" + dot*"-" +"\n" + star*"*" + space*" " + statement + space*" " + star*"*" + "\n" + dot*"-" + "\n\n"
+    return ;
 
 def random_discard():
-	global summoners
-	#remove doubles
-	summoners = list(set(summoners))
+    global summoners
+    #remove doubles
+    summoners = list(set(summoners))
 
-	random.seed()
-	toDiscard = summoners.__len__() - MAX_SUMMONERS
+    toDiscard = summoners.__len__() - MAX_SUMMONERS
 
-	print("Discarding " + str(toDiscard) + " players")
+    # print("Discarding " + str(toDiscard) + " players")
 
-	if toDiscard > 0:
+    if toDiscard > 0:
 
 
-		f = open('summoners.txt', 'r+')
+        f = open('summoners.txt', 'r+')
 
-		for i in range(toDiscard):
-			toRemove = random.randint(0, summoners.__len__() - 1)
-			if random.randint(0, 9) > 8 :
-				f.writelines(summoners[toRemove])
+        for i in range(toDiscard):
+            toRemove = random.randint(0, summoners.__len__() - 1)
+            if random.randint(0, 99) < 10 :
+                f.write(summoners[toRemove] + "\n")
 
-			summoners.remove(summoners[toRemove])
+            summoners.remove(summoners[toRemove])
 
-	print summoners
+    # print summoners
 
-	return;
+    return;
+
+def time_format(seconds):
+
+    seconds = int(seconds)
+    minutes, seconds = divmod(seconds, 60)
+    hours, minutes = divmod(minutes, 60)
+
+    out = " "
+
+    if hours > 0:
+        out = out + str(hours) + " h "
+        minutes = minutes % 60
+
+    if minutes > 0:
+        out = out + str(minutes) + " m "
+        seconds = seconds % 60
+
+    out = out + str(seconds) + " s"
+
+    return out;
 
 
 run()
