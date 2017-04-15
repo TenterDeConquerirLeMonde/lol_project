@@ -7,7 +7,7 @@ MAX_API_CALLS = 10
 WAIT_TIME_SECONDS = 12
 
 matchUrl = "https://na.api.pvp.net/api/lol/na/v1.3/game/by-summoner/"
-rankUrl = "https://na.api.riotgames.com/api/lol/NA/v2.5/league/by-summoner/"
+rankUrl = "https://na.api.pvp.net/api/lol/na/v2.5/league/by-summoner/"
 
 testSummonerId = "59781731"
 
@@ -224,12 +224,10 @@ def load_keys():
 
 	f = open('keys.txt', 'r')
 	for line in f:
-		apiKey.append("?api_key=" + line[:-1])
+		apiKey.append("?api_key=" + line[42:])
 		firstCallTime.append(0)
 
 	f.close()
-	for key in apiKey:
-		print key
 
 	return ;
 
