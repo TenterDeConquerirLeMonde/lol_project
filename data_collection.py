@@ -70,8 +70,7 @@ def run():
 
         if(data is not None):
 
-            print "Recording games from summoner : " + str(summoner) + " out of " + str(summoners.__len__()) \
-                  + " listed summoners"
+            # print "Recording games from summoner : " + str(summoner)
             n += 1
             s,d,i = record_games(summoner, data["games"], c)
             success += s
@@ -176,7 +175,8 @@ def record_games(summonerId, games, c):
             duplicate += 1
 
     # print(str(i - 1) + " games added to db")
-    print(str(i) + " new games, " + str(duplicate) + " duplicate games and " + str(invalid) + " invalid")
+    print("Summoner " + summonerId + " : " + str(i) + " new games, " + str(duplicate) + " duplicate games and " \
+          + str(invalid) + " invalid")
     return i, duplicate, invalid;
 
 
