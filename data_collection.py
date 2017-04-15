@@ -104,17 +104,11 @@ def record_games(summonerId, games, c):
 				if(game["teamId"] == 100):
 					champsTeam1.append(game["championId"])
 					levelTeam1.append(stats[summonerId])
-					# if(game["stats"]["win"]):
-					# 	winnerTeam = 100
-					# else:
-					# 	winnerTeam = 200
+
 				else:
 					champsTeam2.append(game["championId"])
 					levelTeam2.append(stats[summonerId])
-					# if (game["stats"]["win"]):
-					# 	winnerTeam = 200
-					# else:
-					# 	winnerTeam = 100
+
 
 				for player in game["fellowPlayers"] :
 					if(player["teamId"] == 100):
