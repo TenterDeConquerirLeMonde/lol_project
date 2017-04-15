@@ -23,7 +23,7 @@ currentKey = 0
 
 summoners = [testSummonerId]
 RUN_TIME = 1800
-MAX_SUMMONERS = 20
+MAX_SUMMONERS = 200
 
 
 def run():
@@ -50,7 +50,7 @@ def run():
 
     while summoners and (time.time() - startTime) < RUN_TIME:
 
-        if n % 10 == 0 and n > 0:
+        if n % 15 == 0 and n > 0:
             big_statement(str(success) + " games recorded (" + str(duplicate) + " duplicates and " + str(invalid) \
                           + " invalid ones) so far with " + str(n) + " players in " + time_format(time.time() - startTime))
 
@@ -59,7 +59,7 @@ def run():
 
         summoner = summoners.pop(0)
 
-        log.write(summoner + "\n")
+        # log.write(summoner + "\n")
 
         requestUrl = matchUrl + summoner + "/recent"
         data = api_call(requestUrl)
@@ -86,6 +86,8 @@ def run():
                   + " invalid games) in " + time_format(time.time() - startTime) \
               + " using " + str(totalApiCalls) + " API calls and sleeping for " + time_format(totalSleepTime))
 
+    f = open('summoners.txt', 'r+')
+    f.writelines("\n".join(summoners))
 
     c.execute("SELECT COUNT(*) FROM matchs")
     totaldb = c.fetchone()[0]
@@ -124,11 +126,12 @@ def record_games(summonerId, games, c):
                 levelTeam1 = []
                 levelTeam2 = []
 
-                players = [summonerId]
+                players = []
                 for player in game["fellowPlayers"]:
                     players.append(str(player["summonerId"]))
 
                 summoners.extend(players)
+                players.append(summonerId)
                 #get bulk ranks for all players in the game
 
                 stats = bulk_rank_stats(players)
@@ -365,7 +368,7 @@ def random_discard():
 
         for i in range(toDiscard):
             toRemove = random.randint(0, summoners.__len__() - 1)
-            if random.randint(0, 99) < 10 :
+            if random.randint(0, 99) < 20 :
                 f.write(summoners[toRemove] + "\n")
 
             summoners.remove(summoners[toRemove])
