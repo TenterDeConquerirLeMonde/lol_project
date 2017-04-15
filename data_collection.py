@@ -41,7 +41,7 @@ def run():
 	while summoners and (time.time() - startTime) < RUN_TIME:
 
 
-		summoner = summoners.pop()
+		summoner = summoners.pop(0)
 
 		requestUrl = matchUrl + summoner + "/recent"
 		data = api_call(requestUrl)
@@ -52,6 +52,7 @@ def run():
 
 		if(data is not None):
 
+            print "Recording games from summoner : " + str(summoner)
 			success += record_games(summoner, data["games"], c)
 			random_discard()
 
@@ -80,11 +81,11 @@ def record_games(summonerId, games, c):
 		previous = c.fetchone()
 		# TODO : use test
 		if(previous is None):
-			i += 1
+
 			#new game
 			#check RANKED
 			if(game["subType"] == "RANKED_SOLO_5x5"):
-
+				i += 1
 				champsTeam1 = []
 				champsTeam2 = []
 				levelTeam1 = []
@@ -124,7 +125,6 @@ def record_games(summonerId, games, c):
 				sqlAction = "INSERT INTO matchs VALUES(" + ','.join(map(str, record)) + ")"
 				c.execute(sqlAction)
 				print("New Game " + str(i) + " : " + str(record) + " computed in " + str(format((time.time() - start), '.2f')) + "s")
-
 
 		else:
 			print("Game already recorded")
