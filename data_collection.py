@@ -148,11 +148,11 @@ def bulk_rank_stats(summonerIds):
 	#	print("rank response ok")
 		for id in summonerIds:
 
-			for entry in data[id] :
-				if(entry["queue"] == "RANKED_SOLO_5x5"):
-					rank = 0
-					for x in entry["entries"]:
-						stats[id] = rank_conversion(entry["tier"], x["division"])
+			if id in data.keys() :
+				for entry in data[id] :
+					if(entry["queue"] == "RANKED_SOLO_5x5"):
+						for x in entry["entries"]:
+							stats[id] = rank_conversion(entry["tier"], x["division"])
 
 
 	else:
