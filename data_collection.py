@@ -99,13 +99,22 @@ def record_games(summonerId, games, c):
 				#get bulk ranks for all players in the game
 
 				stats = bulk_rank_stats(players)
+				winnerTeam = (2 - game["stats"]["win"])*game["teamId"] % 300
 
 				if(game["teamId"] == 100):
 					champsTeam1.append(game["championId"])
 					levelTeam1.append(stats[summonerId])
+					# if(game["stats"]["win"]):
+					# 	winnerTeam = 100
+					# else:
+					# 	winnerTeam = 200
 				else:
 					champsTeam2.append(game["championId"])
 					levelTeam2.append(stats[summonerId])
+					# if (game["stats"]["win"]):
+					# 	winnerTeam = 200
+					# else:
+					# 	winnerTeam = 100
 
 				for player in game["fellowPlayers"] :
 					if(player["teamId"] == 100):
@@ -121,6 +130,7 @@ def record_games(summonerId, games, c):
 				record.extend(champsTeam2)
 				record.extend(levelTeam1)
 				record.extend(levelTeam2)
+				record.append(winnerTeam)
 
 				sqlAction = "INSERT INTO matchs VALUES(" + ','.join(map(str, record)) + ")"
 				c.execute(sqlAction)
