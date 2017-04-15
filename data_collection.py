@@ -35,6 +35,7 @@ def run():
 	c = conn.cursor()
 
 	load_keys()
+	load_summoners()
 
 	success = 0
 
@@ -252,6 +253,17 @@ def load_keys():
 	return ;
 
 
+def load_summoners():
+
+	global summoners
+	f = open('summoners.txt', 'r+')
+	for line in f:
+		summoners.append(line[:8])
+
+	f.seek()
+	f.truncate()
+	f.close()
+
 
 
 def rank_conversion(tier, division):
@@ -306,8 +318,14 @@ def random_discard():
 
 	if toDiscard > 0:
 
+
+		f = open('summoners.txt', 'r+')
+
 		for i in range(toDiscard):
-			toRemove = random.randint(0,summoners.__len__() - 1)
+			toRemove = random.randint(0, summoners.__len__() - 1)
+			if random.randint(0, 9) > 8 :
+				f.writelines(summoners[toRemove])
+
 			summoners.remove(summoners[toRemove])
 
 	print summoners
