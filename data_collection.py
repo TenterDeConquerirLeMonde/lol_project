@@ -224,7 +224,7 @@ def load_keys():
 
 	f = open('keys.txt', 'r')
 	for line in f:
-		apiKey.append("?api_key=" + line[42:])
+		apiKey.append("?api_key=" + line[:42])
 		firstCallTime.append(0)
 
 	f.close()
