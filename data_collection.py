@@ -38,7 +38,7 @@ def run():
 
 	success = 0
 
-	while not summoners and (time.time() - startTime) < RUN_TIME:
+	while summoners and (time.time() - startTime) < RUN_TIME:
 
 
 		summoner = summoners.pop()
@@ -52,7 +52,7 @@ def run():
 
 		if(data is not None):
 
-			success += record_games(testSummonerId, data["games"], c)
+			success += record_games(summoner, data["games"], c)
 			random_discard()
 
 		conn.commit()
@@ -298,12 +298,17 @@ def random_discard():
 	random.seed()
 	toDiscard = summoners.__len__() - MAX_SUMMONERS
 
+	print("Discarding " + str(toDiscard) + " players")
+
 	if toDiscard > 0:
 
 		for i in range(toDiscard):
 			toRemove = random.randint(0,summoners.__len__() - 1)
 			summoners.remove(summoners[toRemove])
-	return
+
+	print summoners
+
+	return;
 
 
 run()
