@@ -2,6 +2,7 @@ import sqlite3
 import requests
 import json
 import time
+import random
 
 MAX_API_CALLS = 10
 WAIT_TIME_SECONDS = 12
@@ -20,6 +21,10 @@ totalApiCalls = 0
 totalSleepTime = 0
 currentKey = 0
 
+summoners = [testSummonerId]
+RUN_TIME = 60
+MAX_SUMMONERS = 20
+
 
 def run():
 
@@ -31,22 +36,31 @@ def run():
 
 	load_keys()
 
-	requestUrl = matchUrl + testSummonerId + "/recent"
-	data = api_call(requestUrl)
+	success = 0
 
-	# response = requests.get(requestUrl + testApiKey)
-	# print requestUrl + testApiKey
-	# print("Matchs request : " + str(response.status_code))
+	while not summoners and (time.time() - startTime) < RUN_TIME:
 
-	if(data is not None):
 
-		success = record_games(testSummonerId, data["games"], c)
+		summoner = summoners.pop()
 
-	conn.commit()
+		requestUrl = matchUrl + summoner + "/recent"
+		data = api_call(requestUrl)
+
+		# response = requests.get(requestUrl + testApiKey)
+		# print requestUrl + testApiKey
+		# print("Matchs request : " + str(response.status_code))
+
+		if(data is not None):
+
+			success += record_games(testSummonerId, data["games"], c)
+			random_discard()
+
+		conn.commit()
+		#conn.close()
+
 	conn.close()
-
 	big_statement(str(success) + " games recorded in " + str(format((time.time() - startTime), '.2f')) \
-		  + " s using " + str(totalApiCalls) + " API calls and sleeping for " + str(format(totalSleepTime, '.2f')) + " s")
+			  + " s using " + str(totalApiCalls) + " API calls and sleeping for " + str(format(totalSleepTime, '.2f')) + " s")
 
 	return ;
 
@@ -54,6 +68,7 @@ def run():
 def record_games(summonerId, games, c):
 	#Parse the json and add to the DB
 	i = 0
+	global summoners
 
 	for game in games:
 		start = time.time()
@@ -79,6 +94,7 @@ def record_games(summonerId, games, c):
 				for player in game["fellowPlayers"]:
 					players.append(str(player["summonerId"]))
 
+				summoners.extend(players)
 				#get bulk ranks for all players in the game
 
 				stats = bulk_rank_stats(players)
@@ -273,6 +289,21 @@ def big_statement(statement):
 	space = 5
 	print  "\n\n" + dot*"-" +"\n" + star*"*" + space*" " + statement + space*" " + star*"*" + "\n" + dot*"-" + "\n\n"
 	return ;
+
+def random_discard():
+	global summoners
+	#remove doubles
+	summoners = list(set(summoners))
+
+	random.seed()
+	toDiscard = summoners.__len__() - MAX_SUMMONERS
+
+	if toDiscard > 0:
+
+		for i in range(toDiscard):
+			toRemove = random.randint(0,summoners.__len__() - 1)
+			summoners.remove(summoners[toRemove])
+	return
 
 
 run()
