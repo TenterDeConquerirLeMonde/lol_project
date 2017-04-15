@@ -11,7 +11,7 @@ rankUrl = "https://na.api.riotgames.com/api/lol/NA/v2.5/league/by-summoner/"
 
 testSummonerId = "59781731"
 
-testApiKey = "?api_key=" + "RGAPI-B34D1399-0E8A-4DF4-86A2-FF6B9264E79A"
+#testApiKey = "?api_key=" + "RGAPI-B34D1399-0E8A-4DF4-86A2-FF6B9264E79A"
 
 apiKey = []
 firstCallTime = []
@@ -34,9 +34,9 @@ def run():
 	requestUrl = matchUrl + testSummonerId + "/recent"
 	data = api_call(requestUrl)
 
-	response = requests.get(requestUrl + testApiKey)
-	print requestUrl + testApiKey
-	print("Matchs request : " + str(response.status_code))
+	# response = requests.get(requestUrl + testApiKey)
+	# print requestUrl + testApiKey
+	# print("Matchs request : " + str(response.status_code))
 
 	if(data is not None):
 
@@ -224,7 +224,7 @@ def load_keys():
 
 	f = open('keys.txt', 'r')
 	for line in f:
-		apiKey.append("?api_key=" + line[:-2])
+		apiKey.append("?api_key=" + line[:-1])
 		firstCallTime.append(0)
 
 	f.close()
