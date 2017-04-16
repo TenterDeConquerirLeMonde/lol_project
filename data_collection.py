@@ -3,12 +3,17 @@ import requests
 import json
 import time
 import random
+import thread
+import operator
+
+import print_functions as pf
 
 MAX_API_CALLS = 10
 WAIT_TIME_SECONDS = 12
 RUN_TIME = 3600
 MAX_SUMMONERS = 200
 INTERMEDIATE_REPORT = 15
+LOG = False
 
 matchUrl = "https://na.api.pvp.net/api/lol/na/v1.3/game/by-summoner/"
 rankUrl = "https://na.api.pvp.net/api/lol/na/v2.5/league/by-summoner/"
@@ -26,6 +31,8 @@ currentKey = 0
 apiError500 = 0
 apiError429 = 0
 apiErrors = 0
+
+globalLock = thread.allocate_lock()
 
 summoners = [testSummonerId]
 
@@ -54,17 +61,19 @@ def run():
     invalidList = []
     duplicateList = []
 
-    log = open('log.txt', 'w')
+    if LOG:
+        log = open('log.txt', 'w')
 
 
     while summoners and (time.time() - startTime) < RUN_TIME:
 
         if n % INTERMEDIATE_REPORT == 0 and n > 0:
-            print big_statement(str(success) + " games recorded (" + str(duplicate) + " duplicates and " + str(invalid) \
-                          + " invalid ones) so far with " + str(n) + " players in " + time_format(time.time() - startTime))
+            print pf.big_statement(str(success) + " games recorded (" + str(duplicate) + " duplicates and " + str(invalid) \
+                          + " invalid ones) so far with " + str(n) + " players in " + pf.time_format(time.time() - startTime))
 
         # print summoners
-        log.write(str(summoners) + "\n")
+        if LOG:
+            log.write(str(summoners) + "\n")
 
         summoner = summoners.pop(0)
 
@@ -97,10 +106,10 @@ def run():
         #conn.close()
 
 
-    finalStatement = big_statement(str(success) + " games recorded (" + str(duplicate) + " duplicates and " + str(invalid)\
-                  + " invalid games) in " + time_format(time.time() - startTime) \
+    finalStatement = pf.big_statement(str(success) + " games recorded (" + str(duplicate) + " duplicates and " + str(invalid)\
+                  + " invalid games) in " + pf.time_format(time.time() - startTime) \
               + " using " + str(totalApiCalls) + " API calls (" +str(apiErrors) + " errors, 500 : " + str(apiError500) \
-            + ", 429 : " + str(apiError429) + ") and sleeping for " + time_format(totalSleepTime))
+            + ", 429 : " + str(apiError429) + ") and sleeping for " + pf.time_format(totalSleepTime))
 
     print finalStatement
 
@@ -113,9 +122,10 @@ def run():
     totaldb = c.fetchone()[0]
 
     conn.close()
-    log.close()
+    if LOG:
+        log.close()
 
-    print big_statement("The database contains " + str(totaldb) + " games")
+    print pf.big_statement("The database contains " + str(totaldb) + " games")
 
     report(totaldb, successList, invalidList, duplicateList, finalStatement)
 
@@ -129,8 +139,11 @@ def record_games(summonerId, games, c):
     duplicate = 0
     global summoners
 
+    locks = []
+    records = []
+
     for game in games:
-        start = time.time()
+        # start = time.time()
         #check if already recorded
         sqlCheck = "SELECT champ11 FROM matchs WHERE gameId = " + str(game["gameId"])
         # print sqlCheck
@@ -143,78 +156,98 @@ def record_games(summonerId, games, c):
             #check RANKED
             if(game["subType"] == "RANKED_SOLO_5x5"):
                 i += 1
-                champsTeam1 = []
-                champsTeam2 = []
-                levelTeam1 = []
-                levelTeam2 = []
 
-                players = []
-                for player in game["fellowPlayers"]:
-                    players.append(str(player["summonerId"]))
+                newRecord = []
+                newLock = thread.allocate_lock()
+                records.append(newRecord)
+                locks.append(newLock)
 
-                #select 2 highest and 2 lowest players
-                #calculate the rank
-                stats = bulk_rank_stats(players)
-                #sort players by rank asc
-                stats_cp = sorted(stats.items(), key=operator.itemgetter(1))
-                #select the chosen 4 !
-                playersToAppened = []
-                for k in range(2):
-                	playersToAppened.append(stats_cp[k][0])
-                	playersToAppened.append(stats_cp[len(stats_cp)-1-k][0])
-
-                summoners.extend(playersToAppened)
-                players.append(summonerId)
-                #get bulk ranks for all players in the game
-
-                winnerTeam = (2 - game["stats"]["win"])*game["teamId"] % 300
-
-                if(game["teamId"] == 100):
-                    champsTeam1.append(game["championId"])
-                    levelTeam1.append(stats[summonerId])
-
-                else:
-                    champsTeam2.append(game["championId"])
-                    levelTeam2.append(stats[summonerId])
-
-
-                for player in game["fellowPlayers"] :
-                    if(player["teamId"] == 100):
-                        champsTeam1.append(player["championId"])
-                        levelTeam1.append(stats[str(player["summonerId"])])
-                    else :
-                        champsTeam2.append(player["championId"])
-                        levelTeam2.append(stats[str(player["summonerId"])])
-
-
-                record = [game["gameId"]]
-                record.extend(champsTeam1)
-                record.extend(champsTeam2)
-                record.extend(levelTeam1)
-                record.extend(levelTeam2)
-                record.append(winnerTeam)
-
-                if record.__contains__(-1):
-                    # print "Invalid record"
-                    i -= 1
-                    invalid += 1
-
-                else :
-
-                    sqlAction = "INSERT INTO matchs VALUES(" + ','.join(map(str, record)) + ")"
-                    c.execute(sqlAction)
-                    # print("New Game " + str(i) + " : " + str(record) + " computed in " + str(format((time.time() - start), '.2f')) + "s")
+                thread.start_new_thread(compute_game_record,[game, summonerId, newRecord, newLock])
 
         else:
             # print("Game already recorded")
             duplicate += 1
+
+    #Wait for all thread to finish
+
+    for lock in locks:
+        lock.acquire()
+
+    #check for invalid records and commit others to DB
+
+    for record in records:
+
+        if record.__contains__(-1):
+            # print "Invalid record"
+            i -= 1
+            invalid += 1
+
+        else:
+
+            sqlAction = "INSERT INTO matchs VALUES(" + ','.join(map(str, record)) + ")"
+            c.execute(sqlAction)
 
     # print(str(i - 1) + " games added to db")
     print("Summoner " + summonerId + " : " + str(i) + " new games, " + str(duplicate) + " duplicate games and " \
           + str(invalid) + " invalid")
     return i, duplicate, invalid;
 
+def compute_game_record(game, summonerId, record, lock):
 
+    lock.acquire()
+
+    champsTeam1 = []
+    champsTeam2 = []
+    levelTeam1 = []
+    levelTeam2 = []
+
+    players = []
+    for player in game["fellowPlayers"]:
+        players.append(str(player["summonerId"]))
+
+    # select 2 highest and 2 lowest players
+    # calculate the rank
+    stats = bulk_rank_stats(players)
+    # sort players by rank asc
+    stats_cp = sorted(stats.items(), key=operator.itemgetter(1))
+    # select the chosen 4 !
+    playersToAppened = []
+    for k in range(2):
+        playersToAppened.append(stats_cp[k][0])
+        playersToAppened.append(stats_cp[len(stats_cp) - 1 - k][0])
+
+    summoners.extend(playersToAppened)
+    players.append(summonerId)
+    # get bulk ranks for all players in the game
+
+    winnerTeam = (2 - game["stats"]["win"]) * game["teamId"] % 300
+
+    if (game["teamId"] == 100):
+        champsTeam1.append(game["championId"])
+        levelTeam1.append(stats[summonerId])
+
+    else:
+        champsTeam2.append(game["championId"])
+        levelTeam2.append(stats[summonerId])
+
+    for player in game["fellowPlayers"]:
+        if (player["teamId"] == 100):
+            champsTeam1.append(player["championId"])
+            levelTeam1.append(stats[str(player["summonerId"])])
+        else:
+            champsTeam2.append(player["championId"])
+            levelTeam2.append(stats[str(player["summonerId"])])
+
+    record.append(game["gameId"])
+    record.extend(champsTeam1)
+    record.extend(champsTeam2)
+    record.extend(levelTeam1)
+    record.extend(levelTeam2)
+    record.append(winnerTeam)
+
+
+    lock.release()
+    return ;
 
 def bulk_rank_stats(summonerIds):
     #initialize ranks
@@ -248,6 +281,7 @@ def bulk_rank_stats(summonerIds):
 
 def api_call(url, tries = 0) :
 
+    global globalLock
     global apiCalls
     global firstCallTime
     global totalApiCalls
@@ -256,6 +290,9 @@ def api_call(url, tries = 0) :
     global apiError429
     global apiError500
     global apiErrors
+
+    globalLock.acquire()
+
 
     if(apiCalls == MAX_API_CALLS):
         #Reach max on this key go to next key
@@ -274,19 +311,26 @@ def api_call(url, tries = 0) :
 
         firstCallTime[currentKey] = time.time()
 
-    response = requests.get(url + apiKey[currentKey])
     apiCalls += 1
     totalApiCalls += 1
 
+    globalLock.release()
+
+    response = requests.get(url + apiKey[currentKey])
+
+
     if(not response.ok) :
+        globalLock.acquire()
         print "Error " + str(response.status_code) + " on " + url + apiKey[currentKey]
         apiErrors += 1
         if(response.status_code == 500):
             apiError500 += 1
             if(tries < 3):
+                globalLock.release()
                 return api_call(url, tries + 1)
         if(response.status_code == 429):
             apiError429 += 1
+        globalLock.release()
         return None;
 
     return json.loads(response.content)
@@ -350,7 +394,7 @@ def report(n, success, invalid, duplicate, finalStatement):
     f.writelines("\n".join(report))
 
     f.write(finalStatement)
-    f.write(big_statement("Total games in database : " + str(n)))
+    f.write(pf.big_statement("Total games in database : " + str(n)))
 
     f.close()
 
@@ -389,13 +433,6 @@ def division_conversion(division):
     if (division == "I"):
         return 5
 
-def big_statement(statement):
-
-    star = 7
-    space = 5
-    dot = 2*(star + space) + statement.__len__()
-    return  "\n" + dot*"-" +"\n" + star*"*" + space*" " + statement + space*" " + star*"*" + "\n" + dot*"-" + "\n"
-
 
 def random_discard():
     global summoners
@@ -424,25 +461,7 @@ def random_discard():
 
     return;
 
-def time_format(seconds):
 
-    seconds = int(seconds)
-    minutes, seconds = divmod(seconds, 60)
-    hours, minutes = divmod(minutes, 60)
-
-    out = " "
-
-    if hours > 0:
-        out = out + str(hours) + " h "
-        minutes = minutes % 60
-
-    if minutes > 0:
-        out = out + str(minutes) + " m "
-        seconds = seconds % 60
-
-    out = out + str(seconds) + " s"
-
-    return out;
 
 
 run()
