@@ -152,11 +152,21 @@ def record_games(summonerId, games, c):
                 for player in game["fellowPlayers"]:
                     players.append(str(player["summonerId"]))
 
-                summoners.extend(players)
+                #select 2 highest and 2 lowest players
+                #calculate the rank
+                stats = bulk_rank_stats(players)
+                #sort players by rank asc
+                stats_cp = sorted(stats.items(), key=operator.itemgetter(1))
+                #select the chosen 4 !
+                playersToAppened = []
+                for k in range(2):
+                	playersToAppened.append(stats_cp[k][0])
+                	playersToAppened.append(stats_cp[len(stats_cp)-1-k][0])
+
+                summoners.extend(playersToAppened)
                 players.append(summonerId)
                 #get bulk ranks for all players in the game
 
-                stats = bulk_rank_stats(players)
                 winnerTeam = (2 - game["stats"]["win"])*game["teamId"] % 300
 
                 if(game["teamId"] == 100):
