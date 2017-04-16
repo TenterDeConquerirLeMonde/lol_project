@@ -210,6 +210,12 @@ def compute_game_record(game, summonerId, record, lock):
     stats = bulk_rank_stats(players)
     # sort players by rank asc
     stats_cp = sorted(stats.items(), key=operator.itemgetter(1))
+    #remove the current player
+    _k = 0
+    while stats_cp[_k][0] != summonerId:
+    	_k++
+    stats_cp.pop(_k)
+
     # select the chosen 4 !
     playersToAppened = []
     for k in range(2):
