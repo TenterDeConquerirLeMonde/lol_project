@@ -9,7 +9,7 @@ import operator
 import print_functions as pf
 
 MAX_API_CALLS = 10
-WAIT_TIME_SECONDS = 12
+WAIT_TIME_SECONDS = 13
 RUN_TIME = 60
 MAX_SUMMONERS = 200
 INTERMEDIATE_REPORT = 15
@@ -18,7 +18,7 @@ LOG = True
 matchUrl = "https://na.api.pvp.net/api/lol/na/v1.3/game/by-summoner/"
 rankUrl = "https://na.api.pvp.net/api/lol/na/v2.5/league/by-summoner/"
 
-testSummonerId = "59781731"
+testSummonerId = "66580242"
 
 #testApiKey = "?api_key=" + "RGAPI-B34D1399-0E8A-4DF4-86A2-FF6B9264E79A"
 
@@ -143,6 +143,8 @@ def record_games(summonerId, games, c):
     records = []
     playersListToAppend = []
 
+    threadStartLock = thread.allocate_lock()
+
     for game in games:
         # start = time.time()
         #check if already recorded
@@ -165,7 +167,12 @@ def record_games(summonerId, games, c):
                 records.append(newRecord)
                 locks.append(newLock)
 
+                threadStartLock.acquire()
+
                 thread.start_new_thread(compute_game_record,(game, summonerId, newRecord,newPlayersToAppend, newLock))
+                newLock.acquire()
+
+                threadStartLock.release()
 
         else:
             # print("Game already recorded")
@@ -175,6 +182,10 @@ def record_games(summonerId, games, c):
 
     for lock in locks:
         lock.acquire()
+
+    for toAppend in playersListToAppend:
+        summoners.extend(toAppend)
+
 
     #check for invalid records and commit others to DB
 
@@ -187,9 +198,10 @@ def record_games(summonerId, games, c):
 
         else:
 
-            sqlAction = "INSERT INTO matchs VALUES(" + ','.join(map(str, record)) + ")"
-            c.execute(sqlAction)
             # print record
+            sqlAction = "INSERT INTO matchs VALUES(" + ','.join(map(str, record)) + ")"
+            # print sqlAction
+            c.execute(sqlAction)
 
     # print(str(i - 1) + " games added to db")
     print("Summoner " + summonerId + " : " + str(i) + " new games, " + str(duplicate) + " duplicate games and " \
@@ -198,7 +210,6 @@ def record_games(summonerId, games, c):
 
 def compute_game_record(game, summonerId, record, playersToAppened, lock):
 
-    lock.acquire()
 
     champsTeam1 = []
     champsTeam2 = []
@@ -219,7 +230,7 @@ def compute_game_record(game, summonerId, record, playersToAppened, lock):
     #remove the current player
     _k = 0
     while stats_cp[_k][0] != summonerId:
-    	_k++
+        _k += 1
     stats_cp.pop(_k)
     # select the chosen 4 !
     for k in range(2):
@@ -421,8 +432,10 @@ def rank_conversion(tier, division):
         rank = 15
     if (tier == "DIAMOND"):
         rank = 20
+    if (tier == "MASTER"):
+        rank = 25
 
-    #TODO : deal with Master
+    #TODO : deal with Challenger
 
 
     rank = rank + division_conversion(division)
@@ -444,7 +457,7 @@ def division_conversion(division):
 
 def random_discard():
     global summoners
-    #remove doubles
+    #remove duplicates
     summoners = list(set(summoners))
 
     toDiscard = summoners.__len__() - MAX_SUMMONERS
