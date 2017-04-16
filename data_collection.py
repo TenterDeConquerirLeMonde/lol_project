@@ -10,10 +10,10 @@ import print_functions as pf
 
 MAX_API_CALLS = 10
 WAIT_TIME_SECONDS = 12
-RUN_TIME = 3600
+RUN_TIME = 60
 MAX_SUMMONERS = 200
 INTERMEDIATE_REPORT = 15
-LOG = False
+LOG = True
 
 matchUrl = "https://na.api.pvp.net/api/lol/na/v1.3/game/by-summoner/"
 rankUrl = "https://na.api.pvp.net/api/lol/na/v2.5/league/by-summoner/"
@@ -141,6 +141,7 @@ def record_games(summonerId, games, c):
 
     locks = []
     records = []
+    playersListToAppend = []
 
     for game in games:
         # start = time.time()
@@ -159,10 +160,12 @@ def record_games(summonerId, games, c):
 
                 newRecord = []
                 newLock = thread.allocate_lock()
+                newPlayersToAppend = []
+                playersListToAppend.append(newPlayersToAppend)
                 records.append(newRecord)
                 locks.append(newLock)
 
-                thread.start_new_thread(compute_game_record,[game, summonerId, newRecord, newLock])
+                thread.start_new_thread(compute_game_record,(game, summonerId, newRecord,newPlayersToAppend, newLock))
 
         else:
             # print("Game already recorded")
@@ -186,13 +189,14 @@ def record_games(summonerId, games, c):
 
             sqlAction = "INSERT INTO matchs VALUES(" + ','.join(map(str, record)) + ")"
             c.execute(sqlAction)
+            # print record
 
     # print(str(i - 1) + " games added to db")
     print("Summoner " + summonerId + " : " + str(i) + " new games, " + str(duplicate) + " duplicate games and " \
           + str(invalid) + " invalid")
     return i, duplicate, invalid;
 
-def compute_game_record(game, summonerId, record, lock):
+def compute_game_record(game, summonerId, record, playersToAppened, lock):
 
     lock.acquire()
 
@@ -204,21 +208,22 @@ def compute_game_record(game, summonerId, record, lock):
     players = []
     for player in game["fellowPlayers"]:
         players.append(str(player["summonerId"]))
+    players.append(summonerId)
 
     # select 2 highest and 2 lowest players
     # calculate the rank
+    # get bulk ranks for all players in the game
     stats = bulk_rank_stats(players)
     # sort players by rank asc
     stats_cp = sorted(stats.items(), key=operator.itemgetter(1))
+
     # select the chosen 4 !
-    playersToAppened = []
+
     for k in range(2):
         playersToAppened.append(stats_cp[k][0])
         playersToAppened.append(stats_cp[len(stats_cp) - 1 - k][0])
 
-    summoners.extend(playersToAppened)
-    players.append(summonerId)
-    # get bulk ranks for all players in the game
+
 
     winnerTeam = (2 - game["stats"]["win"]) * game["teamId"] % 300
 
