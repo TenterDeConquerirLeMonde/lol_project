@@ -9,8 +9,8 @@ import operator
 import print_functions as pf
 
 MAX_API_CALLS = 10
-WAIT_TIME_SECONDS = 13
-RUN_TIME = 60
+WAIT_TIME_SECONDS = 12.2
+RUN_TIME = 60*15
 MAX_SUMMONERS = 200
 INTERMEDIATE_REPORT = 15
 LOG = True
@@ -372,13 +372,14 @@ def load_keys():
 def load_summoners():
 
     global summoners
-    f = open('summoners.txt', 'r+')
+    f = open('summoners.txt', 'r')
     for line in f:
         if line is not "":
-            summoners.append(line[:-1])
+            if line[-1:] == "\n":
+                summoners.append(line[:-1])
+            else:
+                summoners.append(line)
 
-    f.seek(0)
-    f.truncate()
     f.close()
     random_discard()
 
