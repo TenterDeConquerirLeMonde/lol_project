@@ -6,6 +6,9 @@ import random
 
 MAX_API_CALLS = 10
 WAIT_TIME_SECONDS = 12
+RUN_TIME = 3600
+MAX_SUMMONERS = 200
+INTERMEDIATE_REPORT = 15
 
 matchUrl = "https://na.api.pvp.net/api/lol/na/v1.3/game/by-summoner/"
 rankUrl = "https://na.api.pvp.net/api/lol/na/v2.5/league/by-summoner/"
@@ -20,10 +23,12 @@ apiCalls = 0
 totalApiCalls = 0
 totalSleepTime = 0
 currentKey = 0
+apiError500 = 0
+apiError429 = 0
+apiErrors = 0
 
 summoners = [testSummonerId]
-RUN_TIME = 1800
-MAX_SUMMONERS = 200
+
 
 
 def run():
@@ -45,13 +50,17 @@ def run():
 
     n = 0
 
+    successList = []
+    invalidList = []
+    duplicateList = []
+
     log = open('log.txt', 'w')
 
 
     while summoners and (time.time() - startTime) < RUN_TIME:
 
-        if n % 15 == 0 and n > 0:
-            big_statement(str(success) + " games recorded (" + str(duplicate) + " duplicates and " + str(invalid) \
+        if n % INTERMEDIATE_REPORT == 0 and n > 0:
+            print big_statement(str(success) + " games recorded (" + str(duplicate) + " duplicates and " + str(invalid) \
                           + " invalid ones) so far with " + str(n) + " players in " + time_format(time.time() - startTime))
 
         # print summoners
@@ -73,21 +82,32 @@ def run():
             # print "Recording games from summoner : " + str(summoner)
             n += 1
             s,d,i = record_games(summoner, data["games"], c)
+
             success += s
             invalid += i
             duplicate += d
+
+            successList.append(s)
+            invalidList.append(i)
+            duplicateList.append(d)
+
             random_discard()
 
         conn.commit()
         #conn.close()
 
 
-    big_statement(str(success) + " games recorded (" + str(duplicate) + " duplicates and " + str(invalid)\
+    finalStatement = big_statement(str(success) + " games recorded (" + str(duplicate) + " duplicates and " + str(invalid)\
                   + " invalid games) in " + time_format(time.time() - startTime) \
-              + " using " + str(totalApiCalls) + " API calls and sleeping for " + time_format(totalSleepTime))
+              + " using " + str(totalApiCalls) + " API calls (" +str(apiErrors) + " errors, 500 : " + str(apiError500) \
+            + ", 429 : " + str(apiError429) + ") and sleeping for " + time_format(totalSleepTime))
+
+    print finalStatement
 
     f = open('summoners.txt', 'r+')
     f.writelines("\n".join(summoners))
+
+    print "storing " + str(summoners.__len__()) + " summonerIds for next time"
 
     c.execute("SELECT COUNT(*) FROM matchs")
     totaldb = c.fetchone()[0]
@@ -95,7 +115,9 @@ def run():
     conn.close()
     log.close()
 
-    big_statement("The database countains " + str(totaldb) + " games")
+    print big_statement("The database contains " + str(totaldb) + " games")
+
+    report(totaldb, successList, invalidList, duplicateList, finalStatement)
 
     return ;
 
@@ -211,37 +233,6 @@ def bulk_rank_stats(summonerIds):
 
     return stats;
 
-# def rank_stats(summonerId, c):
-# 	# check db
-# 	rank = -1
-# 	c.execute("SELECT rank FROM players WHERE summonerId = " + str(summonerId))
-# 	knowRank = c.fetchone()
-# 	if (knowRank is not None):
-# 		# print ("Summoner rank already know : " + str(knowRank[0]))
-# 		return knowRank[0]
-#
-#
-# 	else:
-# 		requestUrl = rankUrl + summonerId + "/entry"
-# 		# print requestUrl
-#
-# 		data = api_call(requestUrl)
-#
-# 		if (data is not None):
-# 			#	print("rank response ok")
-#
-# 			for entry in data[summonerId]:
-# 				if (entry["queue"] == "RANKED_SOLO_5x5"):
-# 					rank = 0
-# 					for x in entry["entries"]:
-# 						rank = rank_conversion(entry["tier"], x["division"])
-#
-# 			c.execute("INSERT INTO players VALUES (" + summonerId + "," + str(rank) + ")")
-#
-# 		else:
-# 			print "Rank failure"
-#
-# 		return rank;
 
 
 
@@ -252,6 +243,9 @@ def api_call(url, tries = 0) :
     global totalApiCalls
     global totalSleepTime
     global currentKey
+    global apiError429
+    global apiError500
+    global apiErrors
 
     if(apiCalls == MAX_API_CALLS):
         #Reach max on this key go to next key
@@ -276,9 +270,13 @@ def api_call(url, tries = 0) :
 
     if(not response.ok) :
         print "Error " + str(response.status_code) + " on " + url + apiKey[currentKey]
+        apiErrors += 1
         if(response.status_code == 500):
+            apiError500 += 1
             if(tries < 3):
                 return api_call(url, tries + 1)
+        if(response.status_code == 429):
+            apiError429 += 1
         return None;
 
     return json.loads(response.content)
@@ -303,7 +301,8 @@ def load_summoners():
     global summoners
     f = open('summoners.txt', 'r+')
     for line in f:
-        summoners.append(line[:8])
+        if line is not "":
+            summoners.append(line[:-1])
 
     f.seek(0)
     f.truncate()
@@ -311,6 +310,41 @@ def load_summoners():
     random_discard()
 
 
+def report(n, success, invalid, duplicate, finalStatement):
+    f = open('report-' + str(n) + '.txt', 'w')
+    report = ["Reporting every " + str(INTERMEDIATE_REPORT) + " players\n\n"]
+
+    players = 0
+    s = 0
+    inv =0
+    d = 0
+
+    for i in range(0, success.__len__()):
+
+        players += 1
+        s += success[i]
+        d += duplicate[i]
+        inv += invalid[i]
+
+        if(players == INTERMEDIATE_REPORT):
+            report.append(str(s) + " games, " + str(d) + " duplicates and " \
+                      + str(inv) + " invalids")
+            players = 0
+            s = 0
+            inv = 0
+            d = 0
+
+    report.append(str(s) + " games, " + str(d) + " duplicates and " \
+                  + str(inv) + " invalids (" + str(players) + " players)")
+
+    f.writelines("\n".join(report))
+
+    f.write(finalStatement)
+    f.write(big_statement("Total games in database : " + str(n)))
+
+    f.close()
+
+    return ;
 
 def rank_conversion(tier, division):
 
@@ -346,11 +380,12 @@ def division_conversion(division):
         return 5
 
 def big_statement(statement):
-    dot = 100
+
     star = 7
     space = 5
-    print  "\n\n" + dot*"-" +"\n" + star*"*" + space*" " + statement + space*" " + star*"*" + "\n" + dot*"-" + "\n\n"
-    return ;
+    dot = 2*(star + space) + statement.__len__()
+    return  "\n" + dot*"-" +"\n" + star*"*" + space*" " + statement + space*" " + star*"*" + "\n" + dot*"-" + "\n"
+
 
 def random_discard():
     global summoners
@@ -372,6 +407,8 @@ def random_discard():
                 f.write(summoners[toRemove] + "\n")
 
             summoners.remove(summoners[toRemove])
+
+        random.shuffle(summoners)
 
     # print summoners
 
