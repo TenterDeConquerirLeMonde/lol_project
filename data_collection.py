@@ -5,20 +5,25 @@ import time
 import random
 import thread
 import operator
+import sys
 
 import print_functions as pf
 
 MAX_API_CALLS = 10
-WAIT_TIME_SECONDS = 12.2
-RUN_TIME = 60*15
-MAX_SUMMONERS = 200
-INTERMEDIATE_REPORT = 15
-LOG = True
+WAIT_TIME_SECONDS = 12.1
+
+RUN_TIME = 60
+
+MAX_SUMMONERS = 500
+
+INTERMEDIATE_REPORT = 25
+SUMMONER_BATCH_SIZE = 10
+LOG = False
 
 matchUrl = "https://na.api.pvp.net/api/lol/na/v1.3/game/by-summoner/"
 rankUrl = "https://na.api.pvp.net/api/lol/na/v2.5/league/by-summoner/"
 
-testSummonerId = "66580242"
+testSummonerId = "3675"
 
 #testApiKey = "?api_key=" + "RGAPI-B34D1399-0E8A-4DF4-86A2-FF6B9264E79A"
 
@@ -34,13 +39,15 @@ apiErrors = 0
 
 globalLock = thread.allocate_lock()
 
-summoners = [testSummonerId]
+summoners = []
 
 
 
-def run():
+def run(runTime = RUN_TIME):
 
     global summoners
+
+    random.seed()
 
     startTime = time.time()
 
@@ -65,42 +72,59 @@ def run():
         log = open('log.txt', 'w')
 
 
-    while summoners and (time.time() - startTime) < RUN_TIME:
-
-        if n % INTERMEDIATE_REPORT == 0 and n > 0:
-            print pf.big_statement(str(success) + " games recorded (" + str(duplicate) + " duplicates and " + str(invalid) \
-                          + " invalid ones) so far with " + str(n) + " players in " + pf.time_format(time.time() - startTime))
+    while summoners and (time.time() - startTime) < runTime:
 
         # print summoners
         if LOG:
-            log.write(str(summoners) + "\n")
+            log.write(str(summoners[-(SUMMONER_BATCH_SIZE + 5):]) + "\n")
 
-        summoner = summoners.pop(0)
+        # summoner = summoners.pop()
 
-        # log.write(summoner + "\n")
+        batchLocks = []
+        batch = []
 
-        requestUrl = matchUrl + summoner + "/recent"
-        data = api_call(requestUrl)
 
-        # response = requests.get(requestUrl + testApiKey)
-        # print requestUrl + testApiKey
-        # print("Matchs request : " + str(response.status_code))
+        for i in range(0, min(summoners.__len__(), SUMMONER_BATCH_SIZE)):
+            summoner = summoners.pop()
+            newBatchLock = thread.allocate_lock()
+            dataChunk = {}
+            batch.append((summoner,dataChunk))
+            newBatchLock.acquire()
+            thread.start_new_thread(get_summoner_matchs,(summoner, newBatchLock, dataChunk))
+            batchLocks.append(newBatchLock)
 
-        if(data is not None):
 
-            # print "Recording games from summoner : " + str(summoner)
-            n += 1
-            s,d,i = record_games(summoner, data["games"], c)
+        for lock in batchLocks:
+            lock.acquire()
 
-            success += s
-            invalid += i
-            duplicate += d
 
-            successList.append(s)
-            invalidList.append(i)
-            duplicateList.append(d)
 
-            random_discard()
+        # requestUrl = matchUrl + summoner + "/recent"
+        # data = api_call(requestUrl)
+
+        for (summoner, data) in batch:
+
+            if data is not None:
+        # if(data is not None):
+                if n % INTERMEDIATE_REPORT == 0 and n > 0:
+                    print pf.big_statement(
+                    str(success) + " games recorded (" + str(duplicate) + " duplicates and " + str(invalid) \
+                    + " invalid ones) so far with " + str(n) + " players in " + pf.time_format(time.time() - startTime))
+
+                n += 1
+                # print "Recording games from summoner : " + str(summoner)
+
+                s,d,i = record_games(summoner, data["games"], c)
+
+                success += s
+                invalid += i
+                duplicate += d
+
+                successList.append(s)
+                invalidList.append(i)
+                duplicateList.append(d)
+
+                random_discard()
 
         conn.commit()
         #conn.close()
@@ -109,12 +133,13 @@ def run():
     finalStatement = pf.big_statement(str(success) + " games recorded (" + str(duplicate) + " duplicates and " + str(invalid)\
                   + " invalid games) in " + pf.time_format(time.time() - startTime) \
               + " using " + str(totalApiCalls) + " API calls (" +str(apiErrors) + " errors, 500 : " + str(apiError500) \
-            + ", 429 : " + str(apiError429) + ") and sleeping for " + pf.time_format(totalSleepTime))
+            + ", 429 : " + str(apiError429) + ") and sleeping for " + pf.time_format(totalSleepTime) + " (" + str(format(totalSleepTime * 100/runTime, '.2f')) + " %)")
 
     print finalStatement
 
-    f = open('summoners.txt', 'r+')
+    f = open('summoners.txt', 'w')
     f.writelines("\n".join(summoners))
+    f.close()
 
     print "storing " + str(summoners.__len__()) + " summonerIds for next time"
 
@@ -143,7 +168,6 @@ def record_games(summonerId, games, c):
     records = []
     playersListToAppend = []
 
-    threadStartLock = thread.allocate_lock()
 
     for game in games:
         # start = time.time()
@@ -167,12 +191,10 @@ def record_games(summonerId, games, c):
                 records.append(newRecord)
                 locks.append(newLock)
 
-                threadStartLock.acquire()
 
-                thread.start_new_thread(compute_game_record,(game, summonerId, newRecord,newPlayersToAppend, newLock))
                 newLock.acquire()
+                thread.start_new_thread(compute_game_record,(game, summonerId, newRecord,newPlayersToAppend, newLock))
 
-                threadStartLock.release()
 
         else:
             # print("Game already recorded")
@@ -183,11 +205,13 @@ def record_games(summonerId, games, c):
     for lock in locks:
         lock.acquire()
 
-    for toAppend in playersListToAppend:
-        summoners.extend(toAppend)
+    # for toAppend in playersListToAppend:
+    #     summoners.extend(toAppend)
 
 
     #check for invalid records and commit others to DB
+
+    j = 0
 
     for record in records:
 
@@ -198,14 +222,20 @@ def record_games(summonerId, games, c):
 
         else:
 
+            #Does not insert invalid games players
+            summoners.extend(playersListToAppend[j])
+
             # print record
             sqlAction = "INSERT INTO matchs VALUES(" + ','.join(map(str, record)) + ")"
             # print sqlAction
             c.execute(sqlAction)
 
+        j += 1
+
     # print(str(i - 1) + " games added to db")
     print("Summoner " + summonerId + " : " + str(i) + " new games, " + str(duplicate) + " duplicate games and " \
           + str(invalid) + " invalid")
+
     return i, duplicate, invalid;
 
 def compute_game_record(game, summonerId, record, playersToAppened, lock):
@@ -292,10 +322,30 @@ def bulk_rank_stats(summonerIds):
     else:
         print "Rank failure"
 
+    #test invalid : what is it ?? : 404 error
+    #
+    # if stats.values().__contains__(-1):
+    #     print ','.join(map(str,summonerIds))
+    #     print stats
 
     return stats;
 
+def get_summoner_matchs(summonerId, lock, data):
 
+    requestUrl = matchUrl + summonerId + "/recent"
+    apiData = api_call(requestUrl)
+
+    if apiData is not None:
+        #Transfer knowledge
+        for k,v in apiData.iteritems():
+            data[k] = v
+    else:
+        data = None
+
+
+    lock.release()
+
+    return ;
 
 
 def api_call(url, tries = 0) :
@@ -381,7 +431,6 @@ def load_summoners():
                 summoners.append(line)
 
     f.close()
-    random_discard()
 
 
 def report(n, success, invalid, duplicate, finalStatement):
@@ -468,12 +517,12 @@ def random_discard():
     if toDiscard > 0:
 
 
-        f = open('summoners.txt', 'r+')
+        # f = open('summoners.txt', 'r+')
 
         for i in range(toDiscard):
             toRemove = random.randint(0, summoners.__len__() - 1)
-            if random.randint(0, 99) < 20 :
-                f.write(summoners[toRemove] + "\n")
+            # if random.randint(0, 99) < 20 :
+            #     f.write(summoners[toRemove] + "\n")
 
             summoners.remove(summoners[toRemove])
 
@@ -486,5 +535,10 @@ def random_discard():
 
 
 
-run()
+if __name__ == "__main__":
+    # print sys.argv
+    if len(sys.argv) == 2:
+        run(runTime=int(sys.argv[1]))
 
+    else :
+        print "problem with arguments"
