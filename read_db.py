@@ -1,6 +1,6 @@
 import sqlite3
 import math
-import csv
+import sys
 import print_functions as pf
 
 
@@ -36,7 +36,7 @@ def display_db():
 
     return ;
 
-def average_rank(precision):
+def average_rank(precision, lowerLimit = 0, higherLimit = 31):
 
 
     MAX_RANK = 30 + precision
@@ -75,16 +75,29 @@ def average_rank(precision):
 
     conn.close()
 
-    print pf.big_statement("Games by average rank")
+    output = pf.big_statement("Games by average rank")
+
+    games = 0
 
     for i in range(0, n):
 
-        print(str(MIN_RANK + i*precision) + " <= x < " + str(MIN_RANK + (i+1)*precision) + " : " + str(stats[i]) \
-              + " (" + str(format(float(stats[i]*100)/totaldb,'.3f')) + " %)")
+        if (MIN_RANK + i * precision) >= lowerLimit and (MIN_RANK + (i + 1) * precision) <= higherLimit:
 
-    return ;
+            output += (str(MIN_RANK + i*precision) + " <= x < " + str(MIN_RANK + (i+1)*precision) + " : " + str(stats[i]) \
+              + " (" + str(format(float(stats[i]*100)/totaldb,'.3f')) + " %)\n")
+            games += stats[i]
 
+    output += "\n\n" + str(games) + " games with average rank between " + str(lowerLimit) + " and " + str(higherLimit)
 
-average_rank(0.5)
+    return output;
 
+if __name__ == "__main__":
+    if len(sys.argv) == 2:
+        print average_rank(float(sys.argv[1]))
+    if len(sys.argv) == 3:
+        print average_rank(float(sys.argv[1]), lowerLimit= int(sys.argv[2]))
+    if len(sys.argv) == 4:
+        print average_rank(float(sys.argv[1]), lowerLimit= int(sys.argv[2]), higherLimit= int(sys.argv[3]))
+    else:
+        average_rank(0.5)
 

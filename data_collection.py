@@ -8,6 +8,7 @@ import operator
 import sys
 
 import print_functions as pf
+import read_db as rdb
 
 MAX_API_CALLS = 10
 WAIT_TIME_SECONDS = 12.1
@@ -41,11 +42,19 @@ globalLock = thread.allocate_lock()
 
 summoners = []
 
+minRankLimit = 0
+maxRankLimit = 31
 
 
-def run(runTime = RUN_TIME):
+
+def run(runTime = RUN_TIME, minRank = 0, maxRank = 31):
 
     global summoners
+    global minRankLimit
+    global maxRankLimit
+
+    minRankLimit = minRank
+    maxRankLimit = maxRank
 
     random.seed()
 
@@ -130,12 +139,13 @@ def run(runTime = RUN_TIME):
         #conn.close()
 
 
-    finalStatement = pf.big_statement(str(success) + " games recorded (" + str(duplicate) + " duplicates and " + str(invalid)\
-                  + " invalid games) in " + pf.time_format(time.time() - startTime) \
-              + " using " + str(totalApiCalls) + " API calls (" +str(apiErrors) + " errors, 500 : " + str(apiError500) \
-            + ", 429 : " + str(apiError429) + ") and sleeping for " + pf.time_format(totalSleepTime) + " (" + str(format(totalSleepTime * 100/runTime, '.2f')) + " %)")
+    finalStatement = pf.big_statement(str(success) + " games recorded (" + str(duplicate) + " duplicates and " \
+                    + str(invalid) + " invalid games) from " + str(n) + " players in "
+                    + pf.time_format(time.time() - startTime) + " using " + str(totalApiCalls) \
+                                      + " API calls (" +str(apiErrors) + " errors, 500 : " + str(apiError500) \
+            + ", 429 : " + str(apiError429) + ") and sleeping for " + pf.time_format(totalSleepTime) + \
+                                      " (" + str(format(totalSleepTime * 100/runTime, '.2f')) + " %)")
 
-    print finalStatement
 
     f = open('summoners.txt', 'w')
     f.writelines("\n".join(summoners))
@@ -150,9 +160,16 @@ def run(runTime = RUN_TIME):
     if LOG:
         log.close()
 
+
+    print finalStatement
+
     print pf.big_statement("The database contains " + str(totaldb) + " games")
 
+
+    finalStatement += rdb.average_rank(0.5)
+
     report(totaldb, successList, invalidList, duplicateList, finalStatement)
+
 
     return ;
 
@@ -264,8 +281,11 @@ def compute_game_record(game, summonerId, record, playersToAppened, lock):
     stats_cp.pop(_k)
     # select the chosen 4 !
     for k in range(2):
-        playersToAppened.append(stats_cp[k][0])
-        playersToAppened.append(stats_cp[len(stats_cp) - 1 - k][0])
+        if stats_cp[k][1] >= minRankLimit and stats_cp[k][1] <= maxRankLimit :
+            playersToAppened.append(stats_cp[k][0])
+        if stats_cp[len(stats_cp) - 1 - k][1] >= minRankLimit and stats_cp[len(stats_cp) - 1 - k][1] <= maxRankLimit:
+            playersToAppened.append(stats_cp[len(stats_cp) - 1 - k][0])
+
 
 
 
@@ -539,6 +559,9 @@ if __name__ == "__main__":
     # print sys.argv
     if len(sys.argv) == 2:
         run(runTime=int(sys.argv[1]))
+
+    if len(sys.argv) == 4:
+        run(runTime= int(sys.argv[1]), minRank= int(sys.argv[2]), maxRank= int(sys.argv[3]))
 
     else :
         print "problem with arguments"
