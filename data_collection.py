@@ -6,12 +6,13 @@ import random
 import thread
 import operator
 import sys
+import structures as struct
 
 import print_functions as pf
 import read_db as rdb
 
 MAX_API_CALLS = 10
-WAIT_TIME_SECONDS = 12.1
+WAIT_TIME_SECONDS = 12.15
 
 RUN_TIME = 60
 
@@ -31,9 +32,10 @@ testSummonerId = "3675"
 apiKey = []
 firstCallTime = []
 apiCalls = 0
+currentKey = 0
+
 totalApiCalls = 0
 totalSleepTime = 0
-currentKey = 0
 apiError500 = 0
 apiError429 = 0
 apiErrors = 0
@@ -41,17 +43,25 @@ apiErrors = 0
 globalLock = thread.allocate_lock()
 
 summoners = []
+summonersDone = []
 
 minRankLimit = 0
-maxRankLimit = 31
+maxRankLimit = 36
+targeted = False
 
 
 
-def run(runTime = RUN_TIME, minRank = 0, maxRank = 31):
+def run(runTime = RUN_TIME, minRank = 0, maxRank = 36):
 
     global summoners
+    global summonersDone
     global minRankLimit
     global maxRankLimit
+    global targeted
+
+    if minRank is not minRankLimit or maxRank is not maxRankLimit:
+        targeted = True
+        print "Targeted search " + str(minRank) + " to " + str(maxRank) + "\n"
 
     minRankLimit = minRank
     maxRankLimit = maxRank
@@ -61,11 +71,11 @@ def run(runTime = RUN_TIME, minRank = 0, maxRank = 31):
     startTime = time.time()
 
     conn = sqlite3.connect('lol.db')
-
     c = conn.cursor()
 
     load_keys()
     load_summoners()
+
 
     success = 0
     invalid = 0
@@ -95,6 +105,7 @@ def run(runTime = RUN_TIME, minRank = 0, maxRank = 31):
 
         for i in range(0, min(summoners.__len__(), SUMMONER_BATCH_SIZE)):
             summoner = summoners.pop()
+            summonersDone.append(summoner)
             newBatchLock = thread.allocate_lock()
             dataChunk = {}
             batch.append((summoner,dataChunk))
@@ -113,7 +124,7 @@ def run(runTime = RUN_TIME, minRank = 0, maxRank = 31):
 
         for (summoner, data) in batch:
 
-            if data is not None:
+            if data is not None and 'games' in data:
         # if(data is not None):
                 if n % INTERMEDIATE_REPORT == 0 and n > 0:
                     print pf.big_statement(
@@ -151,6 +162,8 @@ def run(runTime = RUN_TIME, minRank = 0, maxRank = 31):
     f.writelines("\n".join(summoners))
     f.close()
 
+    print finalStatement
+
     print "storing " + str(summoners.__len__()) + " summonerIds for next time"
 
     c.execute("SELECT COUNT(*) FROM matchs")
@@ -160,8 +173,6 @@ def run(runTime = RUN_TIME, minRank = 0, maxRank = 31):
     if LOG:
         log.close()
 
-
-    print finalStatement
 
     print pf.big_statement("The database contains " + str(totaldb) + " games")
 
@@ -180,6 +191,7 @@ def record_games(summonerId, games, c):
     invalid = 0
     duplicate = 0
     global summoners
+    global summonersDone
 
     locks = []
     records = []
@@ -240,7 +252,10 @@ def record_games(summonerId, games, c):
         else:
 
             #Does not insert invalid games players
-            summoners.extend(playersListToAppend[j])
+            for k in range(0, playersListToAppend[j].__len__()):
+                #Remove those already done
+                if not summonersDone.__contains__(playersListToAppend[j][k]):
+                    summoners.append(playersListToAppend[j][k])
 
             # print record
             sqlAction = "INSERT INTO matchs VALUES(" + ','.join(map(str, record)) + ")"
@@ -272,18 +287,27 @@ def compute_game_record(game, summonerId, record, playersToAppened, lock):
     # calculate the rank
     # get bulk ranks for all players in the game
     stats = bulk_rank_stats(players)
-    # sort players by rank asc
-    stats_cp = sorted(stats.items(), key=operator.itemgetter(1))
-    #remove the current player
-    _k = 0
-    while stats_cp[_k][0] != summonerId:
-        _k += 1
-    stats_cp.pop(_k)
-    # select the chosen 4 !
-    for k in range(2):
-        if stats_cp[k][1] >= minRankLimit and stats_cp[k][1] <= maxRankLimit :
+
+    if targeted:
+        #If targeted take all
+        players.remove(summonerId)
+        for p in players:
+            if stats[p] >= minRankLimit and stats[p] <= maxRankLimit:
+                playersToAppened.append(p)
+
+
+    else:
+        #Not targeted take top 2 and bottom 2
+        # sort players by rank asc
+        stats_cp = sorted(stats.items(), key=operator.itemgetter(1))
+        #remove the current player
+        _k = 0
+        while stats_cp[_k][0] != summonerId:
+            _k += 1
+        stats_cp.pop(_k)
+        # select the chosen 4 !
+        for k in range(2):
             playersToAppened.append(stats_cp[k][0])
-        if stats_cp[len(stats_cp) - 1 - k][1] >= minRankLimit and stats_cp[len(stats_cp) - 1 - k][1] <= maxRankLimit:
             playersToAppened.append(stats_cp[len(stats_cp) - 1 - k][0])
 
 
@@ -491,7 +515,7 @@ def report(n, success, invalid, duplicate, finalStatement):
 
 def rank_conversion(tier, division):
 
-    rank = 0
+    rank = -10
     if(tier == "BRONZE"):
         rank = 0
     if (tier == "SILVER"):
@@ -504,8 +528,9 @@ def rank_conversion(tier, division):
         rank = 20
     if (tier == "MASTER"):
         rank = 25
+    if (tier == "CHALLENGER"):
+        rank = 30
 
-    #TODO : deal with Challenger
 
 
     rank = rank + division_conversion(division)
@@ -560,7 +585,7 @@ if __name__ == "__main__":
     if len(sys.argv) == 2:
         run(runTime=int(sys.argv[1]))
 
-    if len(sys.argv) == 4:
+    elif len(sys.argv) == 4:
         run(runTime= int(sys.argv[1]), minRank= int(sys.argv[2]), maxRank= int(sys.argv[3]))
 
     else :

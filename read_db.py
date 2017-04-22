@@ -48,7 +48,6 @@ def average_rank(precision, lowerLimit = 0, higherLimit = 31):
     c = conn.cursor()
 
     matchs = c.execute("SELECT * FROM matchs")
-    total = matchs
 
 
     #initialize stats with the desired granularity
