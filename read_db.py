@@ -36,10 +36,10 @@ def display_db():
 
     return ;
 
-def average_rank(precision, lowerLimit = 0, higherLimit = 31):
+def average_rank(precision, lowerLimit = 0, higherLimit = 36):
 
 
-    MAX_RANK = 30 + precision
+    MAX_RANK = 35 + precision
     MIN_RANK = 1
 
     n = int((MAX_RANK - MIN_RANK)/precision)
