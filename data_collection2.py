@@ -7,6 +7,7 @@ import thread
 import threading
 import operator
 import sys
+import Queue
 import structures as struct
 
 import print_functions as pf
@@ -17,7 +18,6 @@ WAIT_TIME_SECONDS = 12.2
 
 MAX_SUMMONERS = 800
 
-INTERMEDIATE_REPORT = 50
 INTERMEDIATE_TIME_REPORT = 30
 SUMMONER_BATCH_SIZE = 40
 LOG = False
@@ -25,14 +25,11 @@ LOG = False
 matchUrl = "https://na.api.pvp.net/api/lol/na/v1.3/game/by-summoner/"
 rankUrl = "https://na.api.pvp.net/api/lol/na/v2.5/league/by-summoner/"
 
-testSummonerId = "3675"
-
-#testApiKey = "?api_key=" + "RGAPI-B34D1399-0E8A-4DF4-86A2-FF6B9264E79A"
-
+#API parameters
 apiKey = []
 firstCallTime = []
-apiCalls = 0
 currentKey = 0
+apiCalls = 0
 
 totalApiCalls = 0
 totalSleepTime = 0
@@ -41,38 +38,59 @@ apiError429 = 0
 apiErrors = 0
 
 apiLock = thread.allocate_lock()
-recordsLock = thread.allocate_lock()
-records = []
 
-summoners = []
-summonersLock = thread.allocate_lock()
+#Binary Search Trees
 summonersDone = None
 recordedGameIds = None
+invalidSummoners = None
 
+#Rank parameters
 minRankLimit = 0
 maxRankLimit = 36
 targeted = False
 
-rawGames = []
-rawGamesBufferSemaphore = threading._Semaphore(SUMMONER_BATCH_SIZE)
-rawGamesLock = thread.allocate_lock()
-filteredGames = []
-filteredGamesLock = thread.allocate_lock()
-filteredGamesBufferSemaphore = threading._Semaphore(SUMMONER_BATCH_SIZE)
+#Lists and queues for sequential treatment
+
+
+
+summoners = []
+summonersLock = thread.allocate_lock()
+
+summonersToBeTreated = Queue.Queue(2*SUMMONER_BATCH_SIZE)
+
+rawGames = Queue.Queue(2*SUMMONER_BATCH_SIZE)
+# rawGamesBufferSemaphore = threading._Semaphore(SUMMONER_BATCH_SIZE)
+# rawGamesAvailableSemaphore = threading._Semaphore(0)
+# rawGamesLock = thread.allocate_lock()
+
+filteredGames = Queue.Queue(SUMMONER_BATCH_SIZE)
+# filteredGamesLock = thread.allocate_lock()
+# filteredGamesBufferSemaphore = threading._Semaphore(SUMMONER_BATCH_SIZE)
+# filteredGamesAvailableSemaphore = threading.Semaphore(0)
+
+recordsLock = thread.allocate_lock()
+records = []
+
 flyingGamesSemaphore = threading._Semaphore(2*SUMMONER_BATCH_SIZE)
-rawGamesAvailableSemaphore = threading._Semaphore(0)
-filteredGamesAvailableSemaphore = threading.Semaphore(0)
+
+#Threads stop condition
 
 rawGamesCollectionActive = True
 gamesFilteringActive = True
 recordGamesActive = True
+rawGamesDone = False
+
+#Statistics
+
+statisticsLock = thread.allocate_lock()
 
 duplicate = 0
 success = 0
 invalid = 0
 playersDone = 0
 playersInflight = 0
-statisticsLock = thread.allocate_lock()
+
+
 
 
 def run(runTime, minRank = 0, maxRank = 36):
@@ -140,23 +158,19 @@ def run(runTime, minRank = 0, maxRank = 36):
             lastTimeReport = time.time()
 
             summonersLock.acquire()
-            rawGamesLock.acquire()
-            filteredGamesLock.acquire()
             recordsLock.acquire()
             statisticsLock.acquire()
 
-            print pf.big_statement("Summoners : " + str(summoners.__len__()) + ", rawGames : " + str(rawGames.__len__())
-                                   + ", filteredGames : " + str(filteredGames.__len__())
+            print pf.big_statement("Summoners : " + str(summoners.__len__()) + ", rawGames : " + str(rawGames.qsize())
+                                   + ", filteredGames : " + str(filteredGames.qsize())
                                    + " , records : " + str(records.__len__()) + ", in flight : " + str(playersInflight))
             print pf.big_statement(str(success) + " games recorded so far (" + str(duplicate) + " duplicates and " \
                                    + str(invalid) + " invalid games) from " + str(playersDone) + " players in "
-                                   + pf.time_format(lastTimeReport))
+                                   + pf.time_format(lastTimeReport - startTime))
             reportIndex += 1
 
             statisticsLock.release()
             recordsLock.release()
-            filteredGamesLock.release()
-            rawGamesLock.release()
             summonersLock.release()
 
 
@@ -236,20 +250,29 @@ def run(runTime, minRank = 0, maxRank = 36):
     return ;
 
 def raw_games_collection(startTime, runTime):
-    global rawGames
-    global rawGamesLock
+
+    global summonersToBeTreated
     global summoners
     global summonersLock
     global summonersDone
-    global rawGamesBufferSemaphore
     global rawGamesCollectionActive
-    global filteredGames
-    global filteredGamesLock
     global playersInflight
     global statisticsLock
+    global rawGamesDone
 
     # lastChance = False
     # stopCondition = False
+
+    #Starting the thread pool
+
+    threadsLocks = []
+
+
+    for i in range(0, 2*SUMMONER_BATCH_SIZE):
+        lock = thread.allocate_lock()
+        lock.acquire()
+        threadsLocks.append(lock)
+        thread.start_new_thread(get_summoner_matchs, (lock, i))
 
     while rawGamesCollectionActive:
 
@@ -260,17 +283,13 @@ def raw_games_collection(startTime, runTime):
 
         if ((time.time() - startTime) > runTime):
             rawGamesCollectionActive = False
-            rawGamesAvailableSemaphore.release()
         else:
 
-            #The semaphore represent the depth of the rawGames queue
-            rawGamesBufferSemaphore.acquire()
 
             summoner = ""
             summonersLock.acquire()
             if summoners:
                 summoner = summoners.pop()
-                # print "Adding " + summoner + " to rawGames"
             summonersLock.release()
 
             if summoner is not "":
@@ -279,7 +298,7 @@ def raw_games_collection(startTime, runTime):
                 statisticsLock.acquire()
                 playersInflight += 1
                 statisticsLock.release()
-                thread.start_new_thread(get_summoner_matchs, (summoner,))
+                summonersToBeTreated.put(summoner)
                 #Check if time expired
 
             else:
@@ -293,19 +312,25 @@ def raw_games_collection(startTime, runTime):
                     rawGamesCollectionActive = False
                     print "summoners empty and no one in flight"
                     #release semaphore to force next thread to check condition
-                    rawGamesAvailableSemaphore.release()
 
                 statisticsLock.release()
                 summonersLock.release()
 
-                rawGamesBufferSemaphore.release()
                 if rawGamesCollectionActive:
-                    time.sleep(1)
+                    print "Summoners is empty and some are still in flight or summoner has an invalid value"
+                    time.sleep(0.5)
 
+    print "Stop feeding the raw games collection threads"
 
-
+    for lock in threadsLocks:
+        lock.acquire()
 
     print "Ending raw games collection"
+
+    rawGamesDone = True
+
+
+
 
     return ;
 
@@ -314,35 +339,20 @@ def raw_games_collection(startTime, runTime):
 def games_filtering():
 
     global rawGames
-    global rawGamesLock
     global recordedGameIds
     global filteredGames
     global filteredGamesLock
-    global rawGamesAvailableSemaphore
     global gamesFilteringActive
     global rawGamesCollectionActive
     global playersInflight
     global statisticsLock
 
 
-    # TODO: we may loose summoners/games in the "buffers", use semaphore
-
-
     while gamesFilteringActive:
 
-        # Buffer depth
-        filteredGamesBufferSemaphore.acquire()
-        
-        #TODO: take care of end condition
-        rawGamesAvailableSemaphore.acquire()
+        try:
 
-        rawGamesLock.acquire()
-
-
-        if rawGames:
-            rawGamesBufferSemaphore.release()
-            summonerId, data = rawGames.pop(0)
-            rawGamesLock.release()
+            summonerId, data = rawGames.get(timeout = 0.5)
 
             d = 0
             cleanGames = []
@@ -366,32 +376,22 @@ def games_filtering():
 
             if cleanGames:
 
-                filteredGamesLock.acquire()
-                filteredGames.append((summonerId, cleanGames, d))
-                filteredGamesAvailableSemaphore.release()
-                filteredGamesLock.release()
-                # print "Adding a set of games to filteredGames for summoner " + summonerId
+                #May wait until a spot is available
+                filteredGames.put((summonerId, cleanGames, d))
+
             else:
                 # Summoner with no (new or valid) games
                 statisticsLock.acquire()
                 playersInflight -= 1
                 statisticsLock.release()
-                filteredGamesBufferSemaphore.release()
 
 
 
-        else:
-            rawGamesLock.release()
-            #give back the spot we took
-            filteredGamesBufferSemaphore.release()
+        except Queue.Empty:
 
-            print "RawGames is empty, we should end soon"
-            if not rawGamesCollectionActive:
+            if rawGamesDone:
                 gamesFilteringActive = False
-                filteredGamesAvailableSemaphore.release()
-            else:
-                print "rawGames empty, we reach this statement(protected by semaphore) and rawGames " \
-                      + "collection still active, I am not sure of what is happening"
+
 
 
     print "Ending games filtering"
@@ -423,31 +423,21 @@ def record_games():
 
     while recordGamesActive:
 
-        filteredGamesAvailableSemaphore.acquire()
+        try:
+            filteredGame = filteredGames.get(timeout = 0.5)
 
-        gamesToRecord = []
+            gamesToRecord = [filteredGame]
 
-        filteredGamesLock.acquire()
-        #At least one is available
+            for i in range(0, filteredGames.qsize()):
+                gamesToRecord.append(filteredGames.get())
 
-        gamesToRecord.extend(filteredGames)
-        filteredGames = []
-        filteredGamesLock.release()
+            #logging
+            n = 0
+            for summonerId, games, d in gamesToRecord:
+                n += games.__len__()
 
-        filteredGamesAvailableSemaphore.release()
+            print "Batch of " + str(gamesToRecord.__len__()) + " summoners for a total of " + str(n) + " games"
 
-        for i in range(0, gamesToRecord.__len__()):
-            filteredGamesBufferSemaphore.release()
-            filteredGamesAvailableSemaphore.acquire()
-
-        #logging
-        n = 0
-        for summonerId, games, d in gamesToRecord:
-            n += games.__len__()
-
-        print "Batch of " + str(gamesToRecord.__len__()) + " summoners for a total of " + str(n) + " games"
-
-        if gamesToRecord:
 
             playersId = []
 
@@ -477,7 +467,7 @@ def record_games():
                 statisticsLock.release()
                 thread.start_new_thread(compute_game_records, (games, summonerId, d, stats))
 
-        else:
+        except Queue.Empty:
             if not gamesFilteringActive:
                 recordGamesActive = False
             else:
@@ -672,34 +662,42 @@ def bulk_rank_stats(summonerIds, lock, stats):
 
     return ;
 
-def get_summoner_matchs(summonerId):
+def get_summoner_matchs(lock, i):
 
     global rawGames
-    global rawGamesAvailableSemaphore
-    global rawGamesLock
+    global summonersToBeTreated
+    # global rawGamesAvailableSemaphore
+    # global rawGamesBufferSemaphore
+    # global rawGamesLock
     global playersInflight
     global statisticsLock
+    global rawGamesCollectionActive
 
 
+    while rawGamesCollectionActive:
 
-    requestUrl = matchUrl + summonerId + "/recent"
-    apiData = api_call(requestUrl)
 
-    if apiData is not None:
-        #Transfer knowledge
+        try:
+            summonerId = summonersToBeTreated.get(timeout = 0.5)
+            requestUrl = matchUrl + summonerId + "/recent"
+            apiData = api_call(requestUrl)
 
-        rawGamesLock.acquire()
+            if apiData is not None:
+                #Transfer knowledge
 
-        rawGames.append((summonerId,apiData))
+                rawGames.put((summonerId,apiData))
 
-        rawGamesLock.release()
-        rawGamesAvailableSemaphore.release()
+            else:
+                statisticsLock.acquire()
+                playersInflight -= 1
+                statisticsLock.release()
 
-    else:
-        statisticsLock.acquire()
-        playersInflight -= 1
-        statisticsLock.release()
+        except Queue.Empty :
+            pass
 
+    lock.release()
+
+    # print "Thread " + str(i) + " died"
 
     return ;
 
@@ -799,41 +797,41 @@ def load_summoners():
     summonersLock.release()
 
 
-def report(n, success, invalid, duplicate, finalStatement):
-    f = open('report-' + str(n) + '.txt', 'w')
-    report = ["Reporting every " + str(INTERMEDIATE_REPORT) + " players\n\n"]
-
-    players = 0
-    s = 0
-    inv =0
-    d = 0
-
-    for i in range(0, success.__len__()):
-
-        players += 1
-        s += success[i]
-        d += duplicate[i]
-        inv += invalid[i]
-
-        if(players == INTERMEDIATE_REPORT):
-            report.append(str(s) + " games, " + str(d) + " duplicates and " \
-                      + str(inv) + " invalids")
-            players = 0
-            s = 0
-            inv = 0
-            d = 0
-
-    report.append(str(s) + " games, " + str(d) + " duplicates and " \
-                  + str(inv) + " invalids (" + str(players) + " players)")
-
-    f.writelines("\n".join(report))
-
-    f.write(finalStatement)
-    f.write(pf.big_statement("Total games in database : " + str(n)))
-
-    f.close()
-
-    return ;
+# def report(n, success, invalid, duplicate, finalStatement):
+#     f = open('report-' + str(n) + '.txt', 'w')
+#     report = ["Reporting every " + str(INTERMEDIATE_REPORT) + " players\n\n"]
+#
+#     players = 0
+#     s = 0
+#     inv =0
+#     d = 0
+#
+#     for i in range(0, success.__len__()):
+#
+#         players += 1
+#         s += success[i]
+#         d += duplicate[i]
+#         inv += invalid[i]
+#
+#         if(players == INTERMEDIATE_REPORT):
+#             report.append(str(s) + " games, " + str(d) + " duplicates and " \
+#                       + str(inv) + " invalids")
+#             players = 0
+#             s = 0
+#             inv = 0
+#             d = 0
+#
+#     report.append(str(s) + " games, " + str(d) + " duplicates and " \
+#                   + str(inv) + " invalids (" + str(players) + " players)")
+#
+#     f.writelines("\n".join(report))
+#
+#     f.write(finalStatement)
+#     f.write(pf.big_statement("Total games in database : " + str(n)))
+#
+#     f.close()
+#
+#     return ;
 
 def rank_conversion(tier, division):
 
