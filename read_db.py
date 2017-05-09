@@ -36,7 +36,7 @@ def display_db():
 
     return ;
 
-def average_rank(precision, lowerLimit = 0, higherLimit = 36):
+def average_rank(region, precision = 0.5, lowerLimit = 0, higherLimit = 36):
 
 
     MAX_RANK = 35 + precision
@@ -44,7 +44,7 @@ def average_rank(precision, lowerLimit = 0, higherLimit = 36):
 
     n = int((MAX_RANK - MIN_RANK)/precision)
 
-    conn = sqlite3.connect('lol.db')
+    conn = sqlite3.connect('lol-' + region + '.db')
     c = conn.cursor()
 
     matchs = c.execute("SELECT * FROM matchs")
@@ -86,17 +86,18 @@ def average_rank(precision, lowerLimit = 0, higherLimit = 36):
               + " (" + str(format(float(stats[i]*100)/totaldb,'.3f')) + " %)\n")
             games += stats[i]
 
-    output += "\n\n" + str(games) + " games with average rank between " + str(lowerLimit) + " and " + str(higherLimit)
+    output += "\n\n" + str(games) + " games (" + str(format(float(games)*100/totaldb, '.2f')) + "%) with average rank between " + str(lowerLimit) + " and " + str(higherLimit)
+
 
     return output;
 
 if __name__ == "__main__":
     if len(sys.argv) == 2:
-        print average_rank(float(sys.argv[1]))
+        print average_rank(sys.argv[1])
     if len(sys.argv) == 3:
-        print average_rank(float(sys.argv[1]), lowerLimit= int(sys.argv[2]))
-    if len(sys.argv) == 4:
-        print average_rank(float(sys.argv[1]), lowerLimit= int(sys.argv[2]), higherLimit= int(sys.argv[3]))
+        print average_rank(sys.argv[1], precision= float(sys.argv[2]))
+    if len(sys.argv) == 5:
+        print average_rank(sys.argv[1], precision= float(sys.argv[2]), lowerLimit= int(sys.argv[3]), higherLimit= int(sys.argv[4]))
     else:
-        average_rank(0.5)
+        average_rank("na", 0.5)
 

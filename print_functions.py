@@ -1,9 +1,21 @@
 def big_statement(statement):
 
+    statements = statement.split("\n")
+    maxLen = 0
+    for s in statements:
+        if s.__len__() > maxLen:
+            maxLen = s.__len__()
+
     star = 7
     space = 5
-    dot = 2*(star + space) + statement.__len__()
-    return  "\n" + dot*"-" +"\n" + star*"*" + space*" " + statement + space*" " + star*"*" + "\n" + dot*"-" + "\n"
+    dot = 2*(star + space) + maxLen
+
+    output = "\n" + dot*"-" +"\n"
+    for s in statements:
+        n = (maxLen - s.__len__())/2
+        output += star*"*" + (n + space)*" " + s + (maxLen - s.__len__() - n + space)*" " + star*"*" + "\n"
+
+    return (output + dot*"-" + "\n")
 
 
 def time_format(seconds):

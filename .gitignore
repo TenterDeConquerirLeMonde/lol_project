@@ -1,4 +1,4 @@
-summoners.txt
-log.txt
+summoners-*.txt
+log-*.txt
 .idea/*
 report*

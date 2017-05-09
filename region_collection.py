@@ -15,13 +15,11 @@ import read_db as rdb
 MAX_API_CALLS = 10
 WAIT_TIME_SECONDS = 12.2
 
-MAX_SUMMONERS = 800
+MAX_SUMMONERS = 2000
 
-SUMMONER_BATCH_SIZE = 40
+SUMMONER_BATCH_SIZE = 60
+THREAD_LIMIT = 7*MAX_API_CALLS
 LOG = False
-
-
-
 
 
 
@@ -77,16 +75,16 @@ class RegionCollection(object):
         self.summoners = []
         self.summonersLock = thread.allocate_lock()
 
-        self.summonersToBeTreated = Queue.Queue(1.5*SUMMONER_BATCH_SIZE)
+        self.summonersToBeTreated = Queue.Queue(SUMMONER_BATCH_SIZE)
 
-        self.rawGames = Queue.Queue(1.5*SUMMONER_BATCH_SIZE)
+        self.rawGames = Queue.Queue(SUMMONER_BATCH_SIZE)
 
         self.filteredGames = Queue.Queue(SUMMONER_BATCH_SIZE)
 
         self.recordsLock = thread.allocate_lock()
         self.records = []
 
-        self.flyingGamesSemaphore = threading._Semaphore(2*SUMMONER_BATCH_SIZE)
+        # self.flyingGamesSemaphore = threading._Semaphore(SUMMONER_BATCH_SIZE)
 
         #Threads stop condition
 
@@ -116,139 +114,155 @@ class RegionCollection(object):
 
     def run_region(self):
 
-        if self.targeted:
-            print "Targeted search on " + self.region.upper() + " : " + str(self.minRankLimit) + " to " + str(self.maxRankLimit) + "\n"
-        else:
-            print "Untargeted search on " + self.region.upper() + "\n"
+        try:
+
+            if self.targeted:
+                print "Targeted search on " + self.region.upper() + " : " + str(self.minRankLimit) + " to " + str(self.maxRankLimit) + "\n"
+            else:
+                print "Untargeted search on " + self.region.upper() + "\n"
 
 
-        INTERMEDIATE_TIME_REPORT = min(self.runTime/5, 300)
+            INTERMEDIATE_TIME_REPORT = max(10 , min(self.runTime/5, 900))
 
-        random.seed()
+            random.seed()
 
-        startTime = time.time()
+            startTime = time.time()
 
-        conn = sqlite3.connect("lol-" + self.region + ".db")
-        c = conn.cursor()
+            conn = sqlite3.connect("lol-" + self.region + ".db")
+            c = conn.cursor()
 
-        self.load_keys()
-        self.load_summoners()
+            self.load_keys()
+            self.load_summoners()
 
-        #cheating :
-        self.summonersDone = struct.Locked_BST(["5"])
+            #cheating :
+            self.summonersDone = struct.Locked_BST(["5"])
 
-        gameIds = list(c.execute("SELECT gameId FROM matchs"))
-        if gameIds:
-            self.recordedGameIds = struct.Locked_BST(gameIds)
-        else :
-            self.recordedGameIds = struct.Locked_BST([5])
-
-
-        if LOG:
-            log = open('log' + self.region+ '.txt', 'w')
-
-
-        if LOG:
-            log.write(str(self.summoners[-(SUMMONER_BATCH_SIZE + 5):]) + "\n")
-
-        thread.start_new_thread(self.raw_games_collection, (startTime,))
-        thread.start_new_thread(self.games_filtering, ())
-        thread.start_new_thread(self.record_games, ())
-
-
-        active = True
-        lastTimeReport = time.time()
-
-
-        while active:
-
-            if (time.time() - lastTimeReport) > INTERMEDIATE_TIME_REPORT:
-
-                lastTimeReport = time.time()
-
-                self.summonersLock.acquire()
-                self.recordsLock.acquire()
-                self.statisticsLock.acquire()
-
-                print pf.big_statement(self.region.upper() + " Summoners : " + str(self.summoners.__len__()) + ", toBeTreated : " +
-                                       str(self.summonersToBeTreated.qsize()) + ", rawGames : " + str(self.rawGames.qsize())
-                                       + ", filteredGames : " + str(self.filteredGames.qsize())
-                                       + " , records : " + str(self.records.__len__()) + ", in flight : " + str(self.playersInflight))
-                print pf.big_statement(self.region.upper() + " " + str(self.success) + " games recorded so far (" + str(self.duplicate) + " duplicates and " \
-                                       + str(self.invalid) + " invalid games) from " + str(self.playersDone) + " players in "
-                                       + pf.time_format(lastTimeReport - startTime))
-
-                self.statisticsLock.release()
-                self.recordsLock.release()
-                self.summonersLock.release()
-
-
-            newRecords = []
-
-            self.recordsLock.acquire()
-            newRecords.extend(self.records)
-            self.records = []
-            self.recordsLock.release()
-
-
-            if newRecords :
-
-                for r in newRecords:
-
-                    sqlAction = "INSERT INTO matchs VALUES(" + ','.join(map(str, r)) + ")"
-                    c.execute(sqlAction)
-
-                conn.commit()
-
-
+            gameIds = list(c.execute("SELECT gameId FROM matchs"))
+            if gameIds:
+                self.recordedGameIds = struct.Locked_BST(gameIds)
             else :
-                #Check for stop condition
+                self.recordedGameIds = struct.Locked_BST([5])
+
+
+            if LOG:
+                log = open('log' + self.region+ '.txt', 'w')
+
+
+            if LOG:
+                log.write(str(self.summoners[-(SUMMONER_BATCH_SIZE + 5):]) + "\n")
+
+            thread.start_new_thread(self.raw_games_collection, (startTime,))
+            thread.start_new_thread(self.games_filtering, ())
+            thread.start_new_thread(self.record_games, ())
+
+
+            active = True
+            lastTimeReport = time.time()
+
+
+            while active:
+
+
+                # Check for error preventing ending
+                if (time.time() - startTime) > (self.runTime + 600):
+                    print "We had a problem, the program would not stop"
+                    self.rawGamesCollectionActive = False
+                    self.gamesFilteringActive = False
+                    self.recordGamesActive = False
+                    self.rawGamesDone = True
+
+                if (time.time() - lastTimeReport) > INTERMEDIATE_TIME_REPORT:
+
+                    lastTimeReport = time.time()
+
+                    self.summonersLock.acquire()
+                    self.recordsLock.acquire()
+                    self.statisticsLock.acquire()
+
+                    print pf.big_statement(self.region.upper() + " Summoners : " + str(self.summoners.__len__()) + ", toBeTreated : " +
+                                           str(self.summonersToBeTreated.qsize()) + ", rawGames : " + str(self.rawGames.qsize())
+                                           + ", filteredGames : " + str(self.filteredGames.qsize())
+                                           + " , records : " + str(self.records.__len__()) + ", in flight : " + str(self.playersInflight) + "\n" +
+                    self.region.upper() + " " + str(self.success) + " games recorded so far (" + str(self.duplicate) + " duplicates and " \
+                       + str(self.invalid) + " invalid games) from " + str(self.playersDone) + " players in "
+                       + pf.time_format(lastTimeReport - startTime))
+
+                    self.statisticsLock.release()
+                    self.recordsLock.release()
+                    self.summonersLock.release()
+
+
+                newRecords = []
+
                 self.recordsLock.acquire()
-                if not self.recordGamesActive and not self.records:
-                    active = False
-                    self.recordsLock.release()
-                else:
-                    self.recordsLock.release()
-                    time.sleep(1)
+                newRecords.extend(self.records)
+                self.records = []
+                self.recordsLock.release()
 
 
-        self.statisticsLock.acquire()
+                if newRecords :
 
-        print pf.big_statement( "All done : " +
-            self.region.upper() + " Summoners : " + str(self.summoners.__len__()) + ", toBeTreated : " +
-            str(self.summonersToBeTreated.qsize()) + ", rawGames : " + str(self.rawGames.qsize())
-            + ", filteredGames : " + str(self.filteredGames.qsize())
-            + " , records : " + str(self.records.__len__()) + ", in flight : " + str(self.playersInflight))
+                    for r in newRecords:
 
-        finalStatement = pf.big_statement(str(self.success) + " games recorded (" + str(self.duplicate) + " duplicates and " \
-                        + str(self.invalid) + " invalid games) from " + str(self.playersDone) + " players in "
-                        + pf.time_format(time.time() - startTime) + " using " + str(self.totalApiCalls) \
-                                          + " API calls (" +str(self.apiErrors) + " errors, 500 : " + str(self.apiError500) \
-                + ", 429 : " + str(self.apiError429) + ") and sleeping for " + pf.time_format(self.totalSleepTime) + \
-                                          " (" + str(format(self.totalSleepTime * 100/(time.time() - startTime), '.2f')) + " %)")
+                        sqlAction = "INSERT INTO matchs VALUES(" + ','.join(map(str, r)) + ")"
+                        c.execute(sqlAction)
+
+                    conn.commit()
 
 
-        self.statisticsLock.release()
-
-        f = open('summoners-' + self.region + '.txt', 'w')
-        f.writelines("\n".join(self.summoners))
-        f.close()
-
-        print finalStatement
-
-        print self.region.upper() + " storing " + str(self.summoners.__len__()) + " summonerIds for next time"
-
-        c.execute("SELECT COUNT(*) FROM matchs")
-        totaldb = c.fetchone()[0]
-
-        conn.close()
-        if LOG:
-            log.close()
+                else :
+                    #Check for stop condition
+                    self.recordsLock.acquire()
+                    if not self.recordGamesActive and not self.records:
+                        active = False
+                        self.recordsLock.release()
+                    else:
+                        self.recordsLock.release()
+                        time.sleep(1)
 
 
-        print pf.big_statement("The " + self.region.upper() + " database contains " + str(totaldb) + " games")
+            self.statisticsLock.acquire()
 
 
+            finalStatement = pf.big_statement("All done : " +
+                self.region.upper() + " Summoners : " + str(self.summoners.__len__()) + ", toBeTreated : " +
+                str(self.summonersToBeTreated.qsize()) + ", rawGames : " + str(self.rawGames.qsize())
+                + ", filteredGames : " + str(self.filteredGames.qsize())
+                + " , records : " + str(self.records.__len__()) + ", in flight : " + str(self.playersInflight) + "\n" +
+
+                            str(self.success) + " games recorded (" + str(self.duplicate) + " duplicates, " \
+                            + str(self.invalid) + " invalid) from " + str(self.playersDone) + " players in "
+                            + pf.time_format(time.time() - startTime) +" and sleeping for " + pf.time_format(self.totalSleepTime) + \
+                                              " (" + str(format(self.totalSleepTime * 100/(time.time() - startTime), '.2f')) + " %)"
+                                              + "\n" + str(self.totalApiCalls) \
+                                              + " API calls (" +str(self.apiErrors) + " errors, 500 : " + str(self.apiError500) \
+                    + ", 429 : " + str(self.apiError429) + "), games per call ratio : " + str(format(float(self.success) /self.totalApiCalls, '.2f'))
+                                              + ", " + str(format(float(self.success*600)/(time.time() - startTime), '.2f')) + " games per 10 minutes")
+
+
+
+            self.statisticsLock.release()
+
+            f = open('summoners-' + self.region + '.txt', 'w')
+            f.writelines("\n".join(self.summoners))
+            f.close()
+
+            print finalStatement
+
+            print self.region.upper() + " storing " + str(self.summoners.__len__()) + " summonerIds for next time"
+
+            c.execute("SELECT COUNT(*) FROM matchs")
+            totaldb = c.fetchone()[0]
+
+            conn.close()
+            if LOG:
+                log.close()
+
+
+            print pf.big_statement("The " + self.region.upper() + " database contains " + str(totaldb) + " games")
+
+        except:
+            print "An error occured"
         # finalStatement += rdb.average_rank(0.5)
 
         # report(totaldb, successList, invalidList, duplicateList, finalStatement)
@@ -307,16 +321,17 @@ class RegionCollection(object):
                     self.summonersLock.release()
 
                     if self.rawGamesCollectionActive:
-                        print self.region.upper() + " Summoners is empty and some are still in flight or summoner has an invalid value : " + summoner
-                        time.sleep(0.5)
+                        if time.time() - startTime > 60:
+                            print self.region.upper() + " Summoners is empty and some are still in flight"
+                        time.sleep(2)
 
-        print self.region.upper() + " Stop feeding the raw games collection threads"
+        print "\n" + self.region.upper() + " Stop feeding the raw games collection threads\n"
 
         # Barrier
         for lock in threadsLocks:
             lock.acquire()
 
-        print self.region.upper() + " Ending raw games collection"
+        print "\n" + self.region.upper() + " Ending raw games collection\n"
 
         self.rawGamesDone = True
 
@@ -354,11 +369,6 @@ class RegionCollection(object):
 
                         else:
                             d += 1
-                else:
-                    # Summoner with no (new or valid) games
-                    self.statisticsLock.acquire()
-                    self.playersInflight -= 1
-                    self.statisticsLock.release()
 
                 if cleanGames:
 
@@ -380,7 +390,7 @@ class RegionCollection(object):
 
 
 
-        print self.region.upper() + " Ending games filtering"
+        print "\n" + self.region.upper() + " Ending games filtering\n"
 
         return;
 
@@ -440,7 +450,7 @@ class RegionCollection(object):
                 else:
                     print self.region.upper() + " Issue with record games, filtered games is empty"
 
-        print self.region.upper() + " Ending games recording"
+        print "\n" + self.region.upper() + " Ending games recording\n"
 
         return ;
 
@@ -523,9 +533,14 @@ class RegionCollection(object):
         if summonerIds.__len__() % 10 == 0:
             n -= 1
 
-        print self.region.upper() + " Starting " + str(n) + " threads to get " + str(summonerIds.__len__()) + " players' rank"
+        # print self.region.upper() + " Starting " + str(n) + " threads to get " + str(summonerIds.__len__()) + " players' rank"
+
+        semaphore = threading.Semaphore(THREAD_LIMIT)
 
         for i in range(0, n):
+
+            semaphore.acquire()
+
             newLock = thread.allocate_lock()
             locks.append(newLock)
             newLock.acquire()
@@ -533,9 +548,9 @@ class RegionCollection(object):
             stats.append(newStatsChunck)
 
             if i == (n - 1):
-                thread.start_new_thread(self.bulk_rank_stats, (summonerIds[10*i:summonerIds.__len__()], newLock, newStatsChunck))
+                thread.start_new_thread(self.bulk_rank_stats, (summonerIds[10*i:summonerIds.__len__()], newLock, semaphore, newStatsChunck))
             else:
-                thread.start_new_thread(self.bulk_rank_stats, (summonerIds[10*i:10*(i+1)], newLock, newStatsChunck))
+                thread.start_new_thread(self.bulk_rank_stats, (summonerIds[10*i:10*(i+1)], newLock, semaphore, newStatsChunck))
 
 
         for lock in locks:
@@ -550,7 +565,7 @@ class RegionCollection(object):
 
 
 
-    def bulk_rank_stats(self, summonerIds, lock, stats):
+    def bulk_rank_stats(self, summonerIds, lock, semaphore, stats):
 
         # initialize ranks
         for id in summonerIds:
@@ -562,12 +577,14 @@ class RegionCollection(object):
 
         if(data is not None):
             for id in summonerIds:
-
-                if id in data.keys() :
-                    for entry in data[id] :
-                        if(entry["queue"] == "RANKED_SOLO_5x5"):
-                            for x in entry["entries"]:
-                                stats[id] = rank_conversion(entry["tier"], x["division"])
+                try:
+                    if id in data.keys() :
+                        for entry in data[id] :
+                            if(entry["queue"] == "RANKED_SOLO_5x5"):
+                                for x in entry["entries"]:
+                                    stats[id] = rank_conversion(entry["tier"], x["division"])
+                except:
+                    print self.region.upper() + " Rank failure"
 
 
         else:
@@ -607,6 +624,8 @@ class RegionCollection(object):
             self.summoners.extend(newSummoners)
             self.random_discard()
             self.summonersLock.release()
+
+        semaphore.release()
 
         return ;
 

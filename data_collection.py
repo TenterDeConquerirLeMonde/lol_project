@@ -1,19 +1,11 @@
 import sys
 
-
-import print_functions as pf
-import read_db as rdb
 import region_collection as region
 
-MAX_API_CALLS = 10
-WAIT_TIME_SECONDS = 12.15
 
 RUN_TIME = 60
 
-MAX_SUMMONERS = 500
 
-INTERMEDIATE_REPORT = 25
-SUMMONER_BATCH_SIZE = 10
 LOG = False
 
 matchUrl = "https://na.api.pvp.net/api/lol/na/v1.3/game/by-summoner/"
@@ -25,6 +17,10 @@ testSummonerId = "3675"
 
 
 def run(runTime = RUN_TIME, minRank = 0, maxRank = 36):
+
+    if runTime > 3600 :
+        region.MAX_SUMMONERS = 5000
+        region.SUMMONER_BATCH_SIZE = 80
 
     na = region.RegionCollection("na", runTime, minRank, maxRank)
     euw = region.RegionCollection("euw", runTime, minRank, maxRank)
