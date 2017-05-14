@@ -33,6 +33,8 @@ class BST(object):
 
 
     def find_insert(self, item, insert = True):
+        if insert:
+            self.n += 1
         if item == self.value:
             return True
 
@@ -81,3 +83,6 @@ class Locked_BST(object):
             self.tree.find_insert(item)
         self.lock.release()
         return ;
+
+    def __len__(self):
+        return self.tree.n

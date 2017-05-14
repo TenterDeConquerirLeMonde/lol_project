@@ -5,7 +5,8 @@ import time
 import random
 import thread
 import threading
-import operator
+import traceback
+import math
 import Queue
 import structures as struct
 
@@ -17,7 +18,7 @@ WAIT_TIME_SECONDS = 12.2
 
 MAX_SUMMONERS = 2000
 
-SUMMONER_BATCH_SIZE = 60
+SUMMONER_BATCH_SIZE = 30
 THREAD_LIMIT = 7*MAX_API_CALLS
 LOG = False
 
@@ -42,11 +43,6 @@ class RegionCollection(object):
         self.minRankLimit = minRank
         self.maxRankLimit = maxRank
 
-        if minRank is not 0 or maxRank is not 36:
-            self.targeted = True
-        else:
-            self.targeted = False
-
 
         #API parameters
         self.apiKey = []
@@ -65,7 +61,8 @@ class RegionCollection(object):
         #Binary Search Trees
         self.summonersDone = None
         self.recordedGameIds = None
-        self.invalidSummoners = None
+        # self.invalidSummoners = None
+        self.ranks = {}
 
         #Rank parameters
 
@@ -105,6 +102,9 @@ class RegionCollection(object):
 
         self.dataGathering = thread.allocate_lock()
         self.dataGathering.acquire()
+        self.stopLock = None
+        self.erroLog = None
+        self.probabilities = []
 
     def run(self):
         thread.start_new_thread(self.run_region, ())
@@ -112,21 +112,33 @@ class RegionCollection(object):
     def wait_for_end(self):
         self.dataGathering.acquire()
 
+    def stopNow(self, lock):
+        lock.acquire()
+        self.stopLock = lock
+        self.rawGamesCollectionActive = False
+        self.gamesFilteringActive = False
+        self.recordGamesActive = False
+        self.rawGamesDone = True
+        print "stopping the threads"
+
     def run_region(self):
 
         try:
 
-            if self.targeted:
-                print "Targeted search on " + self.region.upper() + " : " + str(self.minRankLimit) + " to " + str(self.maxRankLimit) + "\n"
-            else:
-                print "Untargeted search on " + self.region.upper() + "\n"
+            print "Search on " + self.region.upper() + " : " + str(self.minRankLimit) + " to " + str(self.maxRankLimit) + "\n"
 
 
-            INTERMEDIATE_TIME_REPORT = max(10 , min(self.runTime/5, 900))
+            self.erroLog = open('errorlog-' + self.region+ '.txt', 'w')
+
+            INTERMEDIATE_TIME_REPORT = max(15 , min(self.runTime/5, 900))
 
             random.seed()
 
-            startTime = time.time()
+            distribution = rdb.average_rank_region(self.region, 1)
+            self.calculate_probabilities(distribution)
+
+            print "Probabilities calculated"
+
 
             conn = sqlite3.connect("lol-" + self.region + ".db")
             c = conn.cursor()
@@ -146,10 +158,13 @@ class RegionCollection(object):
 
             if LOG:
                 log = open('log' + self.region+ '.txt', 'w')
+                # log.write(str(self.summoners[-(SUMMONER_BATCH_SIZE + 5):]) + "\n")
 
 
-            if LOG:
-                log.write(str(self.summoners[-(SUMMONER_BATCH_SIZE + 5):]) + "\n")
+
+            startTime = time.time()
+
+            print "gameIds ready, starting threads"
 
             thread.start_new_thread(self.raw_games_collection, (startTime,))
             thread.start_new_thread(self.games_filtering, ())
@@ -166,10 +181,7 @@ class RegionCollection(object):
                 # Check for error preventing ending
                 if (time.time() - startTime) > (self.runTime + 600):
                     print "We had a problem, the program would not stop"
-                    self.rawGamesCollectionActive = False
-                    self.gamesFilteringActive = False
-                    self.recordGamesActive = False
-                    self.rawGamesDone = True
+                    self.stopNow()
 
                 if (time.time() - lastTimeReport) > INTERMEDIATE_TIME_REPORT:
 
@@ -237,7 +249,7 @@ class RegionCollection(object):
                                               + "\n" + str(self.totalApiCalls) \
                                               + " API calls (" +str(self.apiErrors) + " errors, 500 : " + str(self.apiError500) \
                     + ", 429 : " + str(self.apiError429) + "), games per call ratio : " + str(format(float(self.success) /self.totalApiCalls, '.2f'))
-                                              + ", " + str(format(float(self.success*600)/(time.time() - startTime), '.2f')) + " games per 10 minutes")
+                                              + ", " + str(int(self.success*600/(time.time() - startTime))) + " games per 10 minutes")
 
 
 
@@ -258,6 +270,7 @@ class RegionCollection(object):
             if LOG:
                 log.close()
 
+            self.erroLog.close()
 
             print pf.big_statement("The " + self.region.upper() + " database contains " + str(totaldb) + " games")
 
@@ -268,6 +281,8 @@ class RegionCollection(object):
         # report(totaldb, successList, invalidList, duplicateList, finalStatement)
 
         self.dataGathering.release()
+        if self.stopLock is not None:
+            self.stopLock.release()
 
         return ;
 
@@ -323,7 +338,7 @@ class RegionCollection(object):
                     if self.rawGamesCollectionActive:
                         if time.time() - startTime > 60:
                             print self.region.upper() + " Summoners is empty and some are still in flight"
-                        time.sleep(2)
+                        time.sleep(5)
 
         print "\n" + self.region.upper() + " Stop feeding the raw games collection threads\n"
 
@@ -432,13 +447,18 @@ class RegionCollection(object):
 
                 playersId= list(set(playersId))
 
-                stats = self.get_players_rank(playersId)
+                unknowPlayers,knownRanks = self.filterKnownPlayers(playersId)
 
+                stats = self.get_players_rank(unknowPlayers)
+                stats.update(knownRanks)
+
+                print str(playersId.__len__() - unknowPlayers.__len__()) + " players were already known"
+
+                self.ranks.update(stats)
 
                 for summonerId, games, d in gamesToRecord:
 
-                    #Probably does not impact anything, avoid an explosion of the number of threads which is unlikely
-                    # self.flyingGamesSemaphore.acquire()
+
                     self.statisticsLock.acquire()
                     self.playersInflight -= 1
                     self.statisticsLock.release()
@@ -595,33 +615,20 @@ class RegionCollection(object):
 
         playersToAppend = []
 
-        if self.targeted:
+        # if self.targeted:
             # If targeted take all
-            for p in summonerIds:
-                if stats[p] >= self.minRankLimit and stats[p] <= self.maxRankLimit:
-                    playersToAppend.append(p)
+        for p in summonerIds:
+            if stats[p] >= self.minRankLimit and stats[p] <= self.maxRankLimit:
+                if (not self.summonersDone.find_insert(p, insert=False)):
+                    playersToAppend.append((p, stats[p]))
 
 
-        else:
-            # Not targeted take top 2 and bottom 2
-            # sort players by rank asc
-            if summonerIds.__len__() > 3:
-                stats_cp = sorted(stats.items(), key=operator.itemgetter(1))
-                # select the chosen 4 !
-                for k in range(2):
-                    if stats[stats_cp[k][0]] > 0:
-                        playersToAppend.append(stats_cp[k][0])
-                    if stats[stats_cp[len(stats_cp) - 1 - k][0]] > 0:
-                        playersToAppend.append(stats_cp[len(stats_cp) - 1 - k][0])
+        # print "Adding " + str(newSummoners.__len__()) + " summoners out of a potential of " + str(playersToAppend.__len__()) + ", done : " + str(done) + ", invalid : " + str(inv)
+        # print "Invalid summoners contains : "  +str(self.invalidSummoners.__len__())
 
-        newSummoners = []
-        for summonerId in playersToAppend:
-            if not self.summonersDone.find_insert(summonerId, insert= False):
-                newSummoners.append(summonerId)
-
-        if newSummoners:
+        if playersToAppend:
             self.summonersLock.acquire()
-            self.summoners.extend(newSummoners)
+            self.add_summoners(playersToAppend)
             self.random_discard()
             self.summonersLock.release()
 
@@ -650,12 +657,27 @@ class RegionCollection(object):
 
             except Queue.Empty :
                 pass
+            except :
+                traceback.print_exc()
 
         lock.release()
 
         # print "Thread " + str(i) + " died"
 
         return ;
+
+    def filterKnownPlayers(self, players):
+
+        unknownPlayers = []
+        knownRanks = {}
+
+        for p in players:
+            if p in self.ranks:
+                knownRanks[p] = self.ranks[p]
+            else:
+                unknownPlayers.append(p)
+
+        return unknownPlayers, knownRanks
 
 
     def api_call(self, url, tries = 0) :
@@ -684,13 +706,21 @@ class RegionCollection(object):
 
         self.apiLock.release()
 
-        response = requests.get(url + self.apiKey[self.currentKey])
+
+        try:
+            response = requests.get(url + self.apiKey[self.currentKey])
+        except requests.ConnectionError:
+            print "Connection Error"
+            return None
 
 
         if(not response.ok) :
             self.apiLock.acquire()
-            print "Error " + str(response.status_code) + " on " + url \
-                  # + apiKey[currentKey]
+            self.erroLog.write("Error " + str(response.status_code) + " on " + url + "\n")
+
+            if response.status_code != 500 and response.status_code != 429:
+                print "Error " + str(response.status_code) + " on " + url
+
             self.apiErrors += 1
             if(response.status_code == 500):
                 self.apiError500 += 1
@@ -699,9 +729,14 @@ class RegionCollection(object):
                     return self.api_call(url, tries + 1)
             if(response.status_code == 429):
                 self.apiError429 += 1
-                time.sleep(0.2)
+                time.sleep(0.3)
                 self.apiLock.release()
                 return self.api_call(url, tries)
+            if(response.status_code == 503):
+                time.sleep(0.2 * (tries + 1))
+                self.apiLock.release()
+                return self.api_call(url, tries + 1)
+
             self.apiLock.release()
             return None;
 
@@ -736,8 +771,26 @@ class RegionCollection(object):
         self.summonersLock.release()
 
 
+    def calculate_probabilities(self, distribution):
 
+        POWER = 21
+        total = sum(distribution)
 
+        for d in distribution:
+            self.probabilities.append(math.pow(float(total - d)/total,POWER))
+
+        print self.probabilities
+
+    def add_summoners(self, newSummoners):
+
+        if self.summoners.__len__() > 3*SUMMONER_BATCH_SIZE:
+
+            for s,r in newSummoners:
+                if(random.uniform(0,1) < self.probabilities[r-1]):
+                    self.summoners.append(s)
+        else:
+            for s,_ in newSummoners:
+                self.summoners.append(s)
 
     def random_discard(self):
 

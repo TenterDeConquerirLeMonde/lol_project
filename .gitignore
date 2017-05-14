@@ -2,3 +2,8 @@ summoners-*.txt
 log-*.txt
 .idea/*
 report*
+*.pyc
+errorlog*
+keys.txt
+output.txt
+*.db
