@@ -14,7 +14,7 @@ import print_functions as pf
 import read_db as rdb
 
 MAX_API_CALLS = 10
-WAIT_TIME_SECONDS = 12.2
+WAIT_TIME_SECONDS = 12.3
 
 MAX_SUMMONERS = 2000
 
@@ -61,6 +61,7 @@ class RegionCollection(object):
         #Binary Search Trees
         self.summonersDone = None
         self.recordedGameIds = None
+        self.gameIdCutoff = 0
         # self.invalidSummoners = None
         self.ranks = {}
 
@@ -137,19 +138,20 @@ class RegionCollection(object):
             distribution = rdb.average_rank_region(self.region, 1)
             self.calculate_probabilities(distribution)
 
-            print "Probabilities calculated"
+            print self.region.upper() + " Probabilities calculated"
 
 
             conn = sqlite3.connect("lol-" + self.region + ".db")
             c = conn.cursor()
 
             self.load_keys()
+            self.load_challengers()
             self.load_summoners()
 
             #cheating :
             self.summonersDone = struct.Locked_BST(["5"])
 
-            gameIds = list(c.execute("SELECT gameId FROM matchs"))
+            gameIds = list(c.execute("SELECT gameId FROM matchs WHERE gameId > " + str(self.gameIdCutoff)))
             if gameIds:
                 self.recordedGameIds = struct.Locked_BST(gameIds)
             else :
@@ -164,7 +166,7 @@ class RegionCollection(object):
 
             startTime = time.time()
 
-            print "gameIds ready, starting threads"
+            print self.region.upper() + " " + str(self.recordedGameIds.__len__()) + " gameIds ready, starting threads"
 
             thread.start_new_thread(self.raw_games_collection, (startTime,))
             thread.start_new_thread(self.games_filtering, ())
@@ -181,7 +183,6 @@ class RegionCollection(object):
                 # Check for error preventing ending
                 if (time.time() - startTime) > (self.runTime + 600):
                     print "We had a problem, the program would not stop"
-                    self.stopNow()
 
                 if (time.time() - lastTimeReport) > INTERMEDIATE_TIME_REPORT:
 
@@ -230,7 +231,7 @@ class RegionCollection(object):
                         self.recordsLock.release()
                     else:
                         self.recordsLock.release()
-                        time.sleep(1)
+                        time.sleep(5)
 
 
             self.statisticsLock.acquire()
@@ -249,7 +250,8 @@ class RegionCollection(object):
                                               + "\n" + str(self.totalApiCalls) \
                                               + " API calls (" +str(self.apiErrors) + " errors, 500 : " + str(self.apiError500) \
                     + ", 429 : " + str(self.apiError429) + "), games per call ratio : " + str(format(float(self.success) /self.totalApiCalls, '.2f'))
-                                              + ", " + str(int(self.success*600/(time.time() - startTime))) + " games per 10 minutes")
+                                              + ", " + str(int(self.success*600/(time.time() - startTime))) + " games per 10 minutes"\
+                                              + "\nDictionnary of ranks of " + str(self.ranks.__len__()) + " players")
 
 
 
@@ -372,7 +374,8 @@ class RegionCollection(object):
                     # check if already recorded
                     for game in data["games"]:
 
-                        toRecord = "gameId" in game and not self.recordedGameIds.find_insert(game["gameId"])
+                        toRecord = "gameId" in game and game["gameId"] > self.gameIdCutoff \
+                                and not self.recordedGameIds.find_insert(game["gameId"])
 
                         if (toRecord):
 
@@ -452,7 +455,7 @@ class RegionCollection(object):
                 stats = self.get_players_rank(unknowPlayers)
                 stats.update(knownRanks)
 
-                print str(playersId.__len__() - unknowPlayers.__len__()) + " players were already known"
+                print str(format(float(playersId.__len__() - unknowPlayers.__len__())*100/playersId.__len__(), '.2f')) + " % players were already known"
 
                 self.ranks.update(stats)
 
@@ -591,7 +594,7 @@ class RegionCollection(object):
         for id in summonerIds:
             stats[id] = -1
 
-        requestUrl = self.rankUrl + ','.join(map(str, summonerIds)) + "/entry"
+        requestUrl = self.rankUrl + ','.join(map(str, summonerIds)) + "/entry?"
 
         data = self.api_call(requestUrl)
 
@@ -643,7 +646,7 @@ class RegionCollection(object):
 
             try:
                 summonerId = self.summonersToBeTreated.get(timeout = 0.5)
-                requestUrl = self.matchUrl + summonerId + "/recent"
+                requestUrl = self.matchUrl + summonerId + "/recent?"
                 apiData = self.api_call(requestUrl)
 
                 if apiData is not None:
@@ -746,7 +749,7 @@ class RegionCollection(object):
 
         f = open('keys.txt', 'r')
         for line in f:
-            self.apiKey.append("?api_key=" + line[:42])
+            self.apiKey.append("api_key=" + line[:42])
             self.firstCallTime.append(0)
 
         f.close()
@@ -770,10 +773,27 @@ class RegionCollection(object):
 
         self.summonersLock.release()
 
+    def load_challengers(self):
+
+        self.summonersLock.acquire()
+
+        url = "https://" + self.region + ".api.riotgames.com/api/lol/" + self.region.upper() + "/v2.5/league/challenger?type=RANKED_SOLO_5x5&"
+        apiData = self.api_call(url)
+
+        # print apiData
+
+        if apiData is not None:
+            if "entries" in apiData:
+                players = apiData["entries"]
+                for p in players:
+                    self.summoners.append(p["playerOrTeamId"])
+
+        self.summonersLock.release()
+
 
     def calculate_probabilities(self, distribution):
 
-        POWER = 21
+        POWER = 15
         total = sum(distribution)
 
         for d in distribution:
@@ -783,10 +803,11 @@ class RegionCollection(object):
 
     def add_summoners(self, newSummoners):
 
-        if self.summoners.__len__() > 3*SUMMONER_BATCH_SIZE:
+        if self.summoners.__len__() > MAX_SUMMONERS/4:
 
+            emptynessFactor = math.pow(2 * float(self.summoners.__len__()) / MAX_SUMMONERS, 2)
             for s,r in newSummoners:
-                if(random.uniform(0,1) < self.probabilities[r-1]):
+                if(random.uniform(0,1) < math.pow(self.probabilities[r-1], emptynessFactor)):
                     self.summoners.append(s)
         else:
             for s,_ in newSummoners:
@@ -805,7 +826,7 @@ class RegionCollection(object):
                 toRemove = random.randint(0, self.summoners.__len__() - 1)
                 self.summoners.remove(self.summoners[toRemove])
 
-            random.shuffle(self.summoners)
+            # random.shuffle(self.summoners)
 
 
 

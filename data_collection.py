@@ -26,11 +26,13 @@ def run(runTime = RUN_TIME, minRank = 0, maxRank = 36):
     # try:
 
     if runTime >= 3600 :
-        region.MAX_SUMMONERS = 10000
+        region.MAX_SUMMONERS = 100000
         region.SUMMONER_BATCH_SIZE = 100
 
     na = region.RegionCollection("na", runTime, minRank, maxRank)
     euw = region.RegionCollection("euw", runTime, minRank, maxRank)
+    na.gameIdCutoff = 2500000000
+    euw.gameIdCutoff = 3180000000
 
     na.run()
     euw.run()
@@ -51,12 +53,26 @@ def run(runTime = RUN_TIME, minRank = 0, maxRank = 36):
     # naLock.acquire()
     # euwLock.acquire()
 
+def test():
+    na = region.RegionCollection("na", RUN_TIME, 0, 36)
+    euw = region.RegionCollection("euw", RUN_TIME, 0, 36)
+    na.load_keys()
+    euw.load_keys()
+    na.load_summoners()
+    euw.load_challengers()
+
+    print "NA : " + str(na.summoners)
+    print "EUW : " + str(euw.summoners)
+
 
 
 if __name__ == "__main__":
     # print sys.argv
     if len(sys.argv) == 2:
-        run(runTime=int(sys.argv[1]))
+        if sys.argv[1] == "test" :
+            test()
+        else:
+            run(runTime=int(sys.argv[1]))
 
     elif len(sys.argv) == 4:
         run(runTime= int(sys.argv[1]), minRank= int(sys.argv[2]), maxRank= int(sys.argv[3]))

@@ -1,6 +1,7 @@
 import sqlite3
 import math
 import sys
+import time
 import print_functions as pf
 
 MAX_RANK = 35
@@ -69,7 +70,7 @@ def average_rank_region(region, precision):
 
     return stats
 
-def average_rank(region = "", precision = 0.5, lowerLimit = 0, higherLimit = 36):
+def average_rank(region = "", precision = 1.0, lowerLimit = 0, higherLimit = 36):
 
     # stats = []
 
@@ -102,6 +103,12 @@ def average_rank(region = "", precision = 0.5, lowerLimit = 0, higherLimit = 36)
             games += stats[i]
 
     output += "\n\n" + str(games) + " games (" + str(format(float(games)*100/totaldb, '.2f')) + "%) with average rank between " + str(lowerLimit) + " and " + str(higherLimit)
+
+    if precision == 1.0 :
+
+        statsFile = open('games_stats.txt', 'w')
+        statsFile.writelines(map(str, stats))
+        statsFile.close()
 
 
     return output;
