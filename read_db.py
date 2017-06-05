@@ -6,6 +6,7 @@ import print_functions as pf
 
 MAX_RANK = 35
 MIN_RANK = 1
+
 def display_db():
 
     conn = sqlite3.connect('lol.db')
@@ -112,6 +113,102 @@ def average_rank(region = "", precision = 1.0, lowerLimit = 0, higherLimit = 36)
 
 
     return output;
+
+def merge_dbs(toMerge, mergedTo):
+
+    conn = sqlite3.connect('lol-' + mergedTo + '.db')
+    c = conn.cursor()
+
+    total = 0
+
+    for x, lowerLimit, upperLimit in toMerge:
+
+        connToMerge = sqlite3.connect('lol-' + x + '.db')
+        cToMerge = connToMerge.cursor()
+
+        query = "SELECT * FROM matchs"
+        conditions = []
+        if lowerLimit != 0:
+            conditions.append(" gameId >= " + str(lowerLimit))
+        if upperLimit != 0:
+            conditions.append(" gameId < " + str(upperLimit))
+
+        if conditions:
+            query += " WHERE" + ' AND'.join(conditions)
+
+        print query
+
+
+        gamesToMerge = cToMerge.execute(query)
+        n = 0
+
+        for g in gamesToMerge:
+
+            n+=1
+
+            sqlAction = "INSERT INTO matchs VALUES" + str(g)
+            c.execute(sqlAction)
+
+            if n % 10000 == 0:
+                print str(n) + " records transfered : " + str(g[0])
+                conn.commit()
+
+
+        print str(n) + " records transfered"
+
+
+        total += n
+        connToMerge.close()
+
+    print str(total) + " records transfered total"
+
+    conn.commit()
+    conn.close()
+
+
+
+def gameIdsListing(precision = 2, region = ""):
+
+    if region == "":
+        gameIdsListing(precision, 'euw')
+        gameIdsListing(precision, 'na')
+        return
+
+    bounds = []
+
+    conn = sqlite3.connect('lol-' + region + '.db')
+    c = conn.cursor()
+
+    c.execute("SELECT COUNT(*) FROM matchs")
+    totaldb = c.fetchone()[0]
+
+    c.execute("SELECT MAX(gameId) FROM matchs")
+    max = c.fetchone()[0]
+
+    c.execute("SELECT MIN(gameId) FROM matchs")
+    min = c.fetchone()[0]
+
+    print region.upper() + " min : " + str(min) + ", max : " + str(max) + "\n"
+
+    gameIds = c.execute("SELECT gameId FROM matchs ORDER BY gameId")
+
+
+    n = 0
+    p = 0
+    threshold = int(totaldb *float(precision)/100)
+    for g in gameIds:
+        n+= 1
+        if n > p * threshold - 1:
+            print region.upper() + " " + str(p*precision) + "% : " + str(g[0])
+            bounds.append(g[0])
+            p += 1
+
+    print "\nTotal " + region.upper() + " : " + str(totaldb) + "\n"
+
+    conn.close()
+
+    return bounds
+
 
 if __name__ == "__main__":
     if len(sys.argv) == 2:

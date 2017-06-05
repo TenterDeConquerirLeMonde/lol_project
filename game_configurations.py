@@ -2,6 +2,7 @@ import sqlite3
 import requests
 import json
 import time
+import math
 import random
 import thread
 import threading
@@ -32,7 +33,7 @@ class Team(object):
         else:
             return False
 
-def teamConfigurationChunk(games, id, answerQueue):
+def teamConfigurationChunk(region, condition, id, answerQueue):
     #go through these games and add answer to the queue (merge sort like)
     BATCH = 800
     n = 0
@@ -40,10 +41,16 @@ def teamConfigurationChunk(games, id, answerQueue):
     rawTeams = []
     start = time.time()
 
+    conn = sqlite3.connect('lol-' + region + '.db')
+    c = conn.cursor()
+
+    games = c.execute("SELECT * FROM matchs" + condition)
+
+
     for m in games:
 
         if n % 25000 == 0 and n != 0:
-            print id + " " + str(teams.__len__() + rawTeams.__len__()) + " team configurations over " + str(n) \
+            print str(id) + " " + str(teams.__len__() + rawTeams.__len__()) + " team configurations over " + str(n) \
                   + " games"
 
         n += 1
@@ -66,7 +73,7 @@ def teamConfigurationChunk(games, id, answerQueue):
     # teams.sort(key=lambda x: x.n)
     # print list(x.n for x in teams[-50:])
 
-    print id + "done, it contains " + str(teams.__len__()) + " team configurations in " + str(n) \
+    print region.upper() + " " + str(id) + " done, it contains " + str(teams.__len__()) + " team configurations in " + str(n) \
           + " games, done in " + str(format(time.time() - start, '.1f')) + " s"
     # teams.sort(key=lambda  x : x.fingerprint)
 
@@ -79,7 +86,7 @@ def teamConfiguration(regions):
     start = time.time()
 
     configQueue = Queue.Queue()
-    THREADS = 23
+    THREADS = 10
     mergeLock = thread.allocate_lock()
     mergeLock.acquire()
 
@@ -89,48 +96,133 @@ def teamConfiguration(regions):
 
 
     for region in regions:
-        #condition = ""
-
 
         conn = sqlite3.connect('lol-' + region + '.db')
         c = conn.cursor()
+        c.execute("SELECT COUNT(*) FROM matchs")
 
-        c.execute("SELECT max(gameId) FROM matchs")
-        max = c.fetchone()[0] - 1
-        c.execute("SELECT min(gameId) FROM matchs")
-        min = c.fetchone()[0] + 1
+        total += c.fetchone()[0]
 
-        print region.upper() + " min = " + str(min) + ", max = " + str(max)
+        conn.close()
 
-        #For now manual
-        limit = [0, 3070000000]
-        for i in range(1, THREADS):
-            limit.append(3070000000 + i *(82 - i) *100000)
+
+        limits = rdb.gameIdsListing(100/THREADS, region)
+        limits[0] = 0
+        limits[THREADS] = 2* limits[THREADS]
 
         for i in range(0, THREADS):
 
-            id = region.upper() + " " + str(i) + " "
-            batchGameIds = []
+            condition = " WHERE gameId >= " + str(limits[i]) + " and gameId < " + str(limits[i + 1])
+            thread.start_new_thread(teamConfigurationChunk, (region, condition, i + 1 , configQueue))
 
-            condition = " WHERE gameId >= " + str(limit[i]) + " and gameId < " + str(limit[i + 1])
-
-            matchs = c.execute("SELECT * FROM matchs" + condition)
-
-            for row in matchs:
-                batchGameIds.append(list(row))
-
-            thread.start_new_thread(teamConfigurationChunk, (batchGameIds, id , configQueue))
-
-            total += batchGameIds.__len__()
-            print "Starting thread " + id + "with " + str(batchGameIds.__len__()) + " games"
+            print "Starting thread " + region.upper() + " " + str(i + 1) + " with condition " + condition
 
 
-        print "\n\nTotal for " + region.upper() + " : " + str(total) + "\n\n"
+
 
     mergeLock.acquire()
 
     fullConfig = configQueue.get()
     print pf.big_statement("Full config for " + str(regions) + " computed in " + pf.time_format(time.time() - start))
+
+    print pf.big_statement(fullConfig.__len__() + " team configuration in " + str(total) + " games")
+
+    fullConfig.sort(key=lambda x : x.n)
+
+    print list(x.n for x in fullConfig[-100:])
+
+def teamConfigurationByBlocks(regions):
+
+    start = time.time()
+
+    configQueue = Queue.Queue()
+    mergeLock = thread.allocate_lock()
+    mergeLock.acquire()
+
+    BLOCK_SIZE = 50000
+    total = 0
+    blocks = 0
+
+    for region in regions:
+
+        conn = sqlite3.connect('lol-' + region + '.db')
+        c = conn.cursor()
+
+        c.execute("SELECT COUNT(*) FROM matchs")
+        totalRegion = c.fetchone()[0]
+        total += totalRegion
+
+        blocks += int(math.ceil(float(totalRegion) / BLOCK_SIZE))
+
+        conn.close()
+
+    thread.start_new_thread(mergeConfigs, (configQueue, mergeLock, blocks))
+
+    start = time.time()
+
+    for region in regions:
+
+
+        BATCH = 800
+        n = 0
+        teams = []
+        rawTeams = []
+        startRegion = time.time()
+
+        conn = sqlite3.connect('lol-' + region + '.db')
+        c = conn.cursor()
+
+        games = c.execute("SELECT * FROM matchs")
+
+        for m in games:
+
+            if n % 10000 == 0 and n != 0:
+                print str(teams.__len__() + rawTeams.__len__()) + " team configurations over " + str(n) \
+                      + " games"
+
+            n += 1
+
+            t1 = Team(sorted(m[1:6]))
+            t2 = Team(sorted(m[6:11]))
+
+            if not checkKnownTeams(teams, rawTeams, t1):
+                rawTeams.append(t1)
+            if not checkKnownTeams(teams, rawTeams, t2):
+                rawTeams.append(t2)
+
+            if rawTeams.__len__() > BATCH:
+                teams.extend(rawTeams)
+                rawTeams = []
+                teams.sort(key=lambda x: x.fingerprint)
+
+            if n % BLOCK_SIZE == 0 and n != 0:
+                teams.extend(rawTeams)
+                configQueue.put(teams)
+                print("Adding a block of team configuration")
+                rawTeams = []
+                teams = []
+
+        teams.extend(rawTeams)
+        configQueue.put(teams)
+        print("Adding a block of team configuration")
+
+        # teams.sort(key=lambda x: x.n)
+        # print list(x.n for x in teams[-50:])
+
+        print region.upper() + " done, it contains " + str(
+            teams.__len__()) + " team configurations in " + str(n) \
+              + " games, done in " + str(format(time.time() - startRegion, '.1f')) + " s"
+        # teams.sort(key=lambda  x : x.fingerprint)
+
+        conn.close()
+
+
+    mergeLock.acquire()
+
+    fullConfig = configQueue.get()
+    print pf.big_statement("Full config for " + str(regions) + " computed in " + pf.time_format(time.time() - start))
+
+    print pf.big_statement(str(fullConfig.__len__()) + " team configuration in " + str(total) + " games")
 
     fullConfig.sort(key=lambda x : x.n)
 
@@ -161,7 +253,6 @@ def mergeConfigs(configQueue, lock, n):
 
         print "\nMerged with master config, we now have " + str(masterConfig.__len__()) + " team configuration\n"
         # print list(x.n for x in masterConfig[-50:])
-        print ""
 
 
     print "Done merging configs"
@@ -202,7 +293,7 @@ def checkKnownTeams(teams, rawTeams, t):
 
 
 if __name__ == "__main__":
-    teamConfiguration(sys.argv[1:])
+    teamConfigurationByBlocks(sys.argv[1:])
 
 
 

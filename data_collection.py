@@ -31,8 +31,8 @@ def run(runTime = RUN_TIME, minRank = 0, maxRank = 36):
 
     na = region.RegionCollection("na", runTime, minRank, maxRank)
     euw = region.RegionCollection("euw", runTime, minRank, maxRank)
-    na.gameIdCutoff = 2500000000
-    euw.gameIdCutoff = 3180000000
+    na.gameIdCutoff = 2510000000
+    euw.gameIdCutoff = 3200000000
 
     na.run()
     euw.run()
@@ -78,4 +78,4 @@ if __name__ == "__main__":
         run(runTime= int(sys.argv[1]), minRank= int(sys.argv[2]), maxRank= int(sys.argv[3]))
 
     else :
-        print "problem with arguments"
+        print "usage: data_collection.py <time> [<minRank> <maxRank>]"

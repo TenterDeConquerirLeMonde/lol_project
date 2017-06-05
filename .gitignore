@@ -7,3 +7,4 @@ errorlog*
 keys.txt
 output.txt
 *.db
+.idea/

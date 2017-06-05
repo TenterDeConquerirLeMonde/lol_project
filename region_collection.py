@@ -16,7 +16,7 @@ import read_db as rdb
 MAX_API_CALLS = 10
 WAIT_TIME_SECONDS = 12.3
 
-MAX_SUMMONERS = 2000
+MAX_SUMMONERS = 20000
 
 SUMMONER_BATCH_SIZE = 30
 THREAD_LIMIT = 7*MAX_API_CALLS
@@ -795,9 +795,12 @@ class RegionCollection(object):
 
         POWER = 15
         total = sum(distribution)
+        if total == 0:
+            self.probabilities = map(lambda x: 1, distribution)
+        else:
 
-        for d in distribution:
-            self.probabilities.append(math.pow(float(total - d)/total,POWER))
+            for d in distribution:
+                self.probabilities.append(math.pow(float(total - d)/total,POWER))
 
         print self.probabilities
 

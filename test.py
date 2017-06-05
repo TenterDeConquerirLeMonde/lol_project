@@ -26,5 +26,22 @@ def test():
     return
 
 
-rdb.teamConfiguration(["euw"])
+def deleteEntries():
 
+    regions = ['euw', 'na']
+    limits = [3120000000, 2450000000]
+
+    for i in range(0,2):
+
+        conn = sqlite3.connect("lol-" + regions[i] + ".db")
+        c = conn.cursor()
+
+        c.execute("DELETE FROM matchs WHERE gameId < " + str(limits[i]))
+
+        conn.commit()
+
+        conn.close()
+
+
+
+rdb.merge_dbs([('euw', 3185117746, 0)], 'test')
