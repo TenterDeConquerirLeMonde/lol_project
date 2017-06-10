@@ -105,11 +105,11 @@ def average_rank(region = "", precision = 1.0, lowerLimit = 0, higherLimit = 36)
 
     output += "\n\n" + str(games) + " games (" + str(format(float(games)*100/totaldb, '.2f')) + "%) with average rank between " + str(lowerLimit) + " and " + str(higherLimit)
 
-    if precision == 1.0 :
-
-        statsFile = open('games_stats.txt', 'w')
-        statsFile.writelines(map(str, stats))
-        statsFile.close()
+    # if precision == 1.0 :
+    #
+    #     statsFile = open('games_stats.txt', 'w')
+    #     statsFile.writelines(map(str, stats))
+    #     statsFile.close()
 
 
     return output;
