@@ -732,11 +732,11 @@ class RegionCollection(object):
                     return self.api_call(url, tries + 1)
             if(response.status_code == 429):
                 self.apiError429 += 1
-                time.sleep(0.3)
+                time.sleep(0.5)
                 self.apiLock.release()
                 return self.api_call(url, tries)
             if(response.status_code == 503):
-                time.sleep(0.2 * (tries + 1))
+                time.sleep(2 * (tries + 1))
                 self.apiLock.release()
                 return self.api_call(url, tries + 1)
 
